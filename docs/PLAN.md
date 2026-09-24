@@ -7,8 +7,8 @@ verification — so a new project gets it in one command instead of rebuilding i
 This is the second version of the plan. The first was reviewed by six independent
 reviews ([REVIEW-2026-09-24.md](REVIEW-2026-09-24.md)) and a role study
 ([ROLES-2026-09-24.md](ROLES-2026-09-24.md)); this version applies their findings and the
-owner's decisions. It is a living document: each phase is an OpenSpec change, and when a
-phase lands this plan is updated to match.
+owner's decisions. It is a living document: every phase is delivered as one or more
+OpenSpec changes, and when one lands this plan is updated to match.
 
 **Diagrams** (open at https://excalidraw.com → *Open*, or with the VS Code Excalidraw
 extension; regenerate with `python3 docs/diagrams/build.py`):
@@ -256,13 +256,39 @@ script is a later feature, not v0.1.
 
 Each phase is one OpenSpec change with three parts: what it delivers, **how you try it**
 by hand, and the automated tests that need no credentials. Phases are sliced by
-capability so that every one of them leaves something you can use.
+capability so that every one of them leaves something you can use. A phase that would
+deliver several independent capabilities is split into lettered changes, each one usable
+on its own and landing in order; C1 is split that way.
 
-### C1 · install and setup
-- **Delivers:** plugin skeleton and catalogue; `/harnex:setup`; rule sets and their rendering; templates for `AGENTS.md`, `CLAUDE.md`, `.harnex.yml`, `settings.json`, OpenSpec config; the canary rule and its Stop hook; `docs/smoke.md`.
-- **You try it:** install the plugin from your local checkout, open a scratch project, run `/harnex:setup`, answer the questions, look at the six files. Ask Claude anything: the answer ends with your canary word. Delete the canary line from `.harnex/rules.md`, ask again: the hook warns.
-- **Tests:** `claude plugin validate --strict`; render `setup` with defaults for each profile combination and compare with committed snapshots; frontmatter checks; a grep denylist of private names over everything rendered.
-- **Exit:** a scratch project is set up in one command; a second `setup` changes nothing.
+### C1 · install and setup — four changes
+
+C1 delivers the whole installation path, which is four independent capabilities: a plugin
+that installs, rules that render, a setup that writes a project, and a canary that
+enforces itself. Each is its own OpenSpec change, in this order.
+
+#### C1a · an installable plugin
+- **Delivers:** the catalogue `.claude-plugin/marketplace.json` with its single entry; `plugin/.claude-plugin/plugin.json` (name, version `0.1.0`); the five pillar directories, each with a `README.md` stating what belongs in it and what does not; `docs/smoke.md` with the format every later phase appends its manual check to.
+- **You try it:** `claude plugin marketplace add .` from your checkout, `claude plugin install harnex@harnex`, then `/plugin`: harnex is listed with its version. Nothing else happens yet, and that is the point.
+- **Tests:** `claude plugin validate plugin --strict`; a structural test asserting every directory under `plugin/` is either a pillar or one of the directories Claude Code reads; the private-names grep denylist over the whole plugin.
+- **Exit:** the plugin installs from a local checkout and validates strict, on a machine that has never seen harnex.
+
+#### C1b · rule sets and their rendering
+- **Delivers:** the rule file format (frontmatter `id`, `set`, `applies_to`, `enforced_by`) and the six sets of §7 — `git`, `code`, `sdd`, `safety`, `canary`, `language` — one file per rule under `plugin/context/rules/<set>/`; `plugin/scripts/render_rules.py`, which turns a list of sets into `.harnex/rules.md` deterministically. Pillar 1, with the renderer as its only script.
+- **You try it:** `uv run plugin/scripts/render_rules.py --sets git,code --out -` prints the rules file those two sets produce; add `safety` and the file grows by exactly that set.
+- **Tests:** frontmatter schema validation over every rule file; rendering snapshots for several set combinations; an assertion that a rule whose `enforced_by` is not `none` names its enforcer in its body; the private-names denylist over the rendered output.
+- **Exit:** every rule is stated exactly once, and the same set list always renders the same file, byte for byte.
+
+#### C1c · setup writes a project
+- **Delivers:** `/harnex:setup` (pillar 2) and `plugin/scripts/setup.py`; the templates for `AGENTS.md`, `CLAUDE.md`, `.harnex.yml`, `.claude/settings.json` and the OpenSpec config; the questions it asks (profiles, features, canary word, decision backend) and the six files it writes, calling C1b's renderer for `.harnex/rules.md`; the hash manifest at `.harnex/state/manifest.json`, written as it writes, which `update` will read in C6.
+- **You try it:** open a scratch project, run `/harnex:setup`, answer the questions, read the six files. Run it a second time: nothing changes. Write your own `AGENTS.md` first and run it: yours is left untouched.
+- **Tests:** render with defaults for each profile combination against committed snapshots; a second run is byte-identical to the first; an existing `AGENTS.md` and an existing OpenSpec config are never overwritten; the manifest records a hash for every harness-owned path.
+- **Exit:** a scratch project is set up in one command, and a second `setup` changes nothing.
+
+#### C1d · the canary enforces itself
+- **Delivers:** first the spike that answers §12's second open question — whether a Stop hook receives the last assistant message or must read the transcript — recorded in `docs/decisions/`; then `plugin/feedback/canary/canary.py` and the Stop hook in `plugin/hooks/hooks.json`, reading the word from `.harnex.yml` and falling back to `Hullaballoo!` when there is none. Pillar 5, enforcing the `canary` rule that C1b states.
+- **You try it:** ask Claude anything in the scratch project: the answer ends with your canary word. Delete the canary line from `.harnex/rules.md` and ask again: the hook warns that the model has lost its instructions.
+- **Tests:** pytest over recorded Stop payloads — word present, word missing, `.harnex.yml` absent, transcript unreadable — and the hook returning within its timeout in each; a check that every rule with `enforced_by: hook` resolves to a hook that exists, which fails on C1b alone and passes here.
+- **Exit:** the canary is stated once and enforced once, and removing the statement is detected.
 
 ### C2 · explore and propose
 - **Delivers:** the two architect commands wrapping OpenSpec's explore and propose invisibly; the decision client with `mock` and `jev` backends; `phase.route` and its screen line; the verifier's design review inside `propose`.
@@ -313,11 +339,14 @@ surface. Never: an unattended mode.
 11. Names fixed now: `.harnex.yml` keys `project_name`, `profiles`, `features`, `canary`, `decision_model`, `check_command`; rules at `.harnex/rules.md`; state under `.harnex/state/`; tags `vX.Y.Z` from `v0.1.0`.
 12. `docs/` and `openspec/` are public; `.claude/` and `.agents/` at the repo root stay local.
 13. Phases are sliced by capability, each with a manual try and automated tests.
+14. A phase delivering several independent capabilities is split into lettered changes
+    that land in order. C1 is four: `C1a` an installable plugin, `C1b` rule sets and
+    their rendering, `C1c` setup writing a project, `C1d` the canary enforcing itself.
 
 ## 12. Open questions
 
 - Whether `/codex:rescue` can be pointed at a specific branch or worktree, or whether `apply` must create the branch first (answered by the C3 spike).
-- Whether the Stop hook receives the last assistant message directly or must read the transcript (checked in C1).
+- Whether the Stop hook receives the last assistant message directly or must read the transcript (answered by the C1d spike, before any canary code is written).
 - Whether the decision backend for the guard should be allowed in `mock` mode at all, since it would ask on every ambiguous command (default: yes, with the allowlist doing most of the work).
 - Which additional MCP servers, if any, the profiles should declare.
 

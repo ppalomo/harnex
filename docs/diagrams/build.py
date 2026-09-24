@@ -393,11 +393,20 @@ def guard() -> None:
 
 def roadmap() -> None:
     c = Canvas()
-    c.label(40, 20, "Roadmap — one capability per phase, each one you can try yourself", size=28)
+    c.label(40, 20, "Roadmap — one capability per change, each one you can try yourself", size=28)
     caps = [
-        ("C1 · install & setup", TOOLS,
-         "plugin skeleton, /harnex:setup,\nrule sets, canary hook,\nproject files rendered",
-         "install the plugin, run setup\nin a scratch project, ask\nanything → ends with the\ncanary word; remove the rule\n→ hook warns"),
+        ("C1a · installable plugin", TOOLS,
+         "catalogue + plugin.json,\nthe five pillar directories,\ndocs/smoke.md",
+         "marketplace add . , install,\n/plugin → harnex is listed\nwith its version"),
+        ("C1b · rule sets", CONTEXT,
+         "rule file format, the six sets,\nrender_rules.py → .harnex/rules.md",
+         "render --sets git,code → see\nthe file; add safety → it grows\nby exactly that set"),
+        ("C1c · setup", TOOLS,
+         "/harnex:setup, the templates,\nthe six project files,\nthe hash manifest",
+         "run setup in a scratch project,\nread the six files; run it again\n→ nothing changes"),
+        ("C1d · canary", FEEDBACK,
+         "transcript spike first, then\ncanary.py + the Stop hook,\nword read from .harnex.yml",
+         "ask anything → answer ends\nwith your word; delete the rule\n→ the hook warns"),
         ("C2 · explore + propose", ORCH,
          "the two architect commands,\ndecision model client\n(mock + jev backends),\nrouting line on screen",
          "run /harnex:explore 'idea',\nthen /harnex:propose →\nsee 'Decision:' and the\nartifacts appear"),
@@ -414,7 +423,7 @@ def roadmap() -> None:
          "/harnex:update, plugin\nversioning + tags, README,\n'verified against' table,\nfirst real project migrated",
          "change a rule in harnex,\nrun update in the project,\nonly rules.md changes"),
     ]
-    bw, gap = 215, 12
+    bw, gap = 176, 10
     boxes = []
     for i, (name, bg, delivers, try_) in enumerate(caps):
         x = 40 + i * (bw + gap)
@@ -424,7 +433,7 @@ def roadmap() -> None:
         boxes.append(b)
     for a, b in zip(boxes, boxes[1:]):
         c.arrow(a, b, "rl")
-    c.label(40, 440, "Every phase also has automated tests that need no credentials: rendered-file snapshots, frontmatter validation,\nhook tests over recorded stdin payloads, a fake Codex runtime for the loop, a mock decision backend, and a\ngrep for private names. The real Codex / Claude / Jev runs are the manual checks above, recorded in docs/smoke.md.", size=14)
+    c.label(40, 440, "Every change also has automated tests that need no credentials: rendered-file snapshots, frontmatter validation,\nhook tests over recorded stdin payloads, a fake Codex runtime for the loop, a mock decision backend, and a\ngrep for private names. The real Codex / Claude / Jev runs are the manual checks above, recorded in docs/smoke.md.", size=14)
     c.label(40, 520, "Later, not scheduled: real-backend calibration from the decision journal, a Codex-side guard hook,\nand a separate reviewer role. No unattended mode.", size=14)
     c.save("06-roadmap")
 

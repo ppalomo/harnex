@@ -18,7 +18,7 @@ context: |
   agents, hooks and scripts sit at the plugin root as Claude Code expects, and each
   belongs to one pillar.
 
-  The full plan, roadmap (phases C1-C6, sliced by capability, each with a manual try
+  The full plan, roadmap (phases C1a-C6, sliced by capability, each with a manual try
   and automated tests) and settled decisions are in docs/PLAN.md. Read it before
   proposing a change. Do not reopen a settled decision inside another change.
 
@@ -35,7 +35,7 @@ rules:
   proposal:
     - Name the pillar (or pillars, if the change delivers several components) the change belongs to
     - Include a "Non-goals" section
-    - State which phase (C1-C6) of docs/PLAN.md the change belongs to and its exit criterion
+    - State which phase (C1a-C6) of docs/PLAN.md the change belongs to and its exit criterion
   design:
     - Say what setup or update will write in a target project for this change, and who owns each path
   tasks:
