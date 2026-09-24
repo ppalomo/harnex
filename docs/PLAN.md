@@ -134,6 +134,7 @@ harnex/
     scripts/                            decide.py (backend interface), setup.py, update.py — Python, run with uv
   docs/                               PLAN.md, diagrams/, reviews, decisions/ (ADRs), smoke.md
   openspec/                           harnex's own specs and changes
+  tests/  pytest.ini                  harnex's own checks: the layout, the private names, the manifests
 ```
 
 Rules that keep it honest: a component lives in exactly one pillar directory; technologies
@@ -266,11 +267,15 @@ C1 delivers the whole installation path, which is four independent capabilities:
 that installs, rules that render, a setup that writes a project, and a canary that
 enforces itself. Each is its own OpenSpec change, in this order.
 
-#### C1a · an installable plugin
-- **Delivers:** the catalogue `.claude-plugin/marketplace.json` with its single entry; `plugin/.claude-plugin/plugin.json` (name, version `0.1.0`); the five pillar directories, each with a `README.md` stating what belongs in it and what does not; `docs/smoke.md` with the format every later phase appends its manual check to.
-- **You try it:** `claude plugin marketplace add .` from your checkout, `claude plugin install harnex@harnex`, then `/plugin`: harnex is listed with its version. Nothing else happens yet, and that is the point.
-- **Tests:** `claude plugin validate plugin --strict`; a structural test asserting every directory under `plugin/` is either a pillar or one of the directories Claude Code reads; the private-names grep denylist over the whole plugin.
-- **Exit:** the plugin installs from a local checkout and validates strict, on a machine that has never seen harnex.
+#### C1a · an installable plugin — **delivered**, change `bootstrap-installable-plugin`
+- **Delivers:** the catalogue `.claude-plugin/marketplace.json` with its single entry; `plugin/.claude-plugin/plugin.json` (name, version `0.1.0`); the five pillar directories, each with a `README.md` stating what belongs in it, what does not and which change fills it; `docs/smoke.md` with the format every later phase appends its manual check to; `tests/` and `pytest.ini`, the repository's own checks.
+- **You try it:** `claude plugin marketplace add ./` from your checkout, `claude plugin install harnex@harnex`, then `claude plugin details harnex` (or `/plugin` in a session): harnex `0.1.0` is listed with **0 skills, 0 agents, 0 hooks, 0 MCP servers** and `~0 tok` added to every session. Nothing else happens yet, and that is the point. Full steps in [smoke.md](smoke.md).
+- **Tests:** `uv run --with pytest pytest` — a structural test asserting every directory under `plugin/` is either a pillar or one of the directories Claude Code reads and that every pillar states what it holds; the private-name check in two halves, the committed shapes and a personal list found through `HARNEX_DENYLIST`, which skips itself and says so when the variable is unset; the manifest checks, which shell out to `claude plugin validate` for both manifests and skip when the CLI is absent.
+- **Exit:** met. The plugin installs from a local checkout and validates strict, contributing nothing.
+- **What it taught us**, verified against Claude Code `2.1.267`:
+  - A plugin with **no components at all** passes `claude plugin validate --strict`; emptiness is not a warning. This is what makes an empty vehicle a change of its own.
+  - `--strict` treats warnings as errors, and two fields are easy to lose: without `author` in `plugin.json` and `metadata.description` in `marketplace.json`, strict fails.
+  - `claude plugin marketplace add .` is rejected — the source must be `owner/repo`, a URL, or a `./path`.
 
 #### C1b · rule sets and their rendering
 - **Delivers:** the rule file format (frontmatter `id`, `set`, `applies_to`, `enforced_by`) and the six sets of §7 — `git`, `code`, `sdd`, `safety`, `canary`, `language` — one file per rule under `plugin/context/rules/<set>/`; `plugin/scripts/render_rules.py`, which turns a list of sets into `.harnex/rules.md` deterministically. Pillar 1, with the renderer as its only script.

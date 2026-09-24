@@ -1,0 +1,28 @@
+{
+  "name": "harnex",
+  "owner": {
+    "name": "Pablo Palomo",
+    "url": "https://github.com/ppalomo"
+  },
+  "metadata": {
+    "description": "The harnex marketplace: one plugin, the harness itself.",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "harnex",
+      "source": "./plugin",
+      "description": "A reusable harness for AI coding agents, organised by the five pillars of a harness.",
+      "version": "0.1.0",
+      "license": "MIT",
+      "homepage": "https://github.com/ppalomo/harnex",
+      "keywords": [
+        "harness",
+        "agents",
+        "spec-driven",
+        "openspec",
+        "guardrails"
+      ]
+    }
+  ]
+}

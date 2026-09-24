@@ -7,8 +7,9 @@ lets it act safely and verifiably: instructions and memory, tools, the agentic l
 guardrails, and verification. harnex centralises the generic parts of that so a project
 gets them in one command instead of rebuilding them.
 
-> Status: **planning**. The full plan, with diagrams, is in [`docs/PLAN.md`](docs/PLAN.md).
-> Nothing is installable yet.
+> Status: **early**. The plugin installs (`C1a`), and deliberately does nothing yet: no
+> command, no skill, no hook. The full plan, with diagrams, is in
+> [`docs/PLAN.md`](docs/PLAN.md); the manual checks are in [`docs/smoke.md`](docs/smoke.md).
 
 ## What it will give you
 

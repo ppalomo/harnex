@@ -38,9 +38,17 @@ deltas into `openspec/specs/` and update `docs/PLAN.md` to match.
 No AI author or co-author lines in commits or pull requests, ever. Commit messages are
 conventional and in English.
 
+## Tests
+
+Run the repository's own checks with `uv run --with pytest pytest`. They check the
+plugin's layout, that nothing private reached it, and that both manifests validate; the
+manifest check skips itself when the Claude Code CLI is absent.
+
 ## Before committing
 
-- `claude plugin validate plugin --strict` and `openspec validate --all` pass.
+- `uv run --with pytest pytest` passes.
+- `claude plugin validate plugin --strict` and `claude plugin validate . --strict` pass,
+  and `openspec validate --all` passes.
 - Nothing under `plugin/` names a project or a private resource.
 - `docs/PLAN.md` still describes the repository as it is; diagrams regenerated if the
   layout or the workflow changed (`python3 docs/diagrams/build.py`).
