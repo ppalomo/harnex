@@ -1,0 +1,47 @@
+schema: spec-driven
+
+# Project context
+# Shown to AI when creating artifacts, and when running apply/archive.
+context: |
+  Language: en. All artifacts are written in English, including OpenSpec structural
+  headings and SHALL/MUST keywords, and the five command names: explore, propose,
+  apply, verify, ship.
+
+  harnex is a public, reusable harness for AI coding agents, delivered as a Claude Code
+  plugin. Agent = Model + Harness: the model reasons, the harness is the deterministic
+  system around it. The owner works in Claude Code; Codex is reached only through its
+  official plugin; a decision model (Jev today, behind a swappable interface with a mock
+  backend) picks tool and model per phase and judges command risk.
+
+  The plugin is organised by the five pillars, one directory each under plugin/:
+  context (1), tools (2), orchestration (3), control (4), feedback (5). Commands, skills,
+  agents, hooks and scripts sit at the plugin root as Claude Code expects, and each
+  belongs to one pillar.
+
+  The full plan, roadmap (phases C1-C6, sliced by capability, each with a manual try
+  and automated tests) and settled decisions are in docs/PLAN.md. Read it before
+  proposing a change. Do not reopen a settled decision inside another change.
+
+  Rules every change must respect:
+  - A component lives in exactly one pillar.
+  - Technologies are named only in plugin/tools/profiles/.
+  - Nothing committed names a project, its domain vocabulary, a private resource or a
+    credential. Project facts are read from the importing project's AGENTS.md.
+  - A rule is stated once in plugin/context/rules/; if enforced, the enforcement lives
+    in control/ or feedback/ and the rule file names it.
+  - No AI author or co-author lines in commits.
+
+rules:
+  proposal:
+    - Name the pillar (or pillars, if the change delivers several components) the change belongs to
+    - Include a "Non-goals" section
+    - State which phase (C1-C6) of docs/PLAN.md the change belongs to and its exit criterion
+  design:
+    - Say what setup or update will write in a target project for this change, and who owns each path
+  tasks:
+    - The last task of every change updates docs/PLAN.md to match what landed
+
+operations:
+  archive:
+    guidance:
+      - Confirm docs/PLAN.md was updated before archiving

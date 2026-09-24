@@ -1,26 +1,46 @@
 # harnex — working instructions
 
-harnex is a public, reusable harness for AI coding agents, organised by the five pillars of
-a harness. This file holds the rules for working in this repository.
+harnex is a public, reusable harness for AI coding agents, delivered as a Claude Code
+plugin and organised by the five pillars of a harness. Read `docs/PLAN.md` before
+proposing anything: it holds the philosophy, the layout, the roadmap and the decisions
+already taken.
 
 ## Language
 
-Everything committed is written in **English**: code, docs, skills, roles, commit messages.
-Reports to the maintainer are in **Spanish**.
+Everything committed is written in **English**: code, docs, rules, roles, commit
+messages, OpenSpec artifacts, diagrams, and the command names (`explore`, `propose`,
+`apply`, `verify`, `ship`).
+
+## Method
+
+Spec-driven development with OpenSpec. A change gets a proposal, a design, delta specs
+and a task list before any file under `plugin/` is written. When a change lands, sync its
+deltas into `openspec/specs/` and update `docs/PLAN.md` to match.
 
 ## Layout rules
 
-- Every component lives in **exactly one pillar** under `harness/`. If it seems to belong
-  to two, it is two components.
-- `harness/` is tool-independent: no `.claude/` or `.agents/` directories inside it. The
-  tool-specific shape is produced by `template/` at import time.
-- `profiles/` is the only place a technology may be named. `harness/` is stack-agnostic.
+- Every component lives in **exactly one pillar** directory under `plugin/`: `context/`,
+  `tools/`, `orchestration/`, `control/`, `feedback/`. If it seems to belong to two, it
+  is two components.
+- `plugin/commands/`, `skills/`, `agents/`, `hooks/` and `scripts/` are where Claude Code
+  looks; what they contain still belongs to one pillar and says which.
+- Technologies are named only in `plugin/tools/profiles/`.
 - Nothing committed names a project, its domain vocabulary, a private resource or a
-  credential. If a component needs a project fact, it reads it from the importing
+  credential. A component that needs a project fact reads it from the importing
   project's `AGENTS.md` at task time, and says so.
-- Skills use the cross-tool `SKILL.md` format: `name` equals the directory name,
-  `description` says when to use it.
+- A rule is stated once, in `plugin/context/rules/`. If it is enforced, the enforcement
+  lives in `control/` or `feedback/` and the rule file names it.
+- Agents and skills use the minimum frontmatter: `name`, `description`, and `tools` for
+  agents. Skills use the cross-tool `SKILL.md` format; `name` equals the directory name.
+
+## Git
+
+No AI author or co-author lines in commits or pull requests, ever. Commit messages are
+conventional and in English.
 
 ## Before committing
 
-- Nothing under `harness/` names a tool directory, a project or a stack.
+- `claude plugin validate plugin --strict` and `openspec validate --all` pass.
+- Nothing under `plugin/` names a project or a private resource.
+- `docs/PLAN.md` still describes the repository as it is; diagrams regenerated if the
+  layout or the workflow changed (`python3 docs/diagrams/build.py`).
