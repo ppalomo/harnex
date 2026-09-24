@@ -23,7 +23,16 @@ expected to remember between tasks.
   A component that needs a project fact reads it from the importing project's working
   instructions at task time, and says so.
 
-## Filled by
+## What is here
 
-`C1b` — the rule file format, the six sets (`git`, `code`, `sdd`, `safety`, `canary`,
-`language`) and the renderer that turns a chosen list of sets into a project's rules file.
+- `rules/` — the rule files, one per rule, grouped in sets: `git`, `code`, `sdd`,
+  `safety`, `canary`, `language`. [`rules/README.md`](rules/README.md) states the format
+  every rule file follows and the vocabulary `enforced_by` draws on.
+- `../scripts/render_rules.py` — this pillar's only script. It turns a chosen list of
+  sets, and the project's profiles, into the rules file a project reads. The rendering is
+  a pure function of those choices, which is what lets `update` own the file by hash.
+
+## Still to come
+
+`C1c` adds the instruction templates that `setup` renders into a project. The progress
+conventions arrive with the workflow in `C2`.

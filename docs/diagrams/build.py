@@ -452,7 +452,7 @@ def layout() -> None:
     c.arrow(root, ospec, "bl", via=[(140, 655)])
 
     items = [
-        ("context/", CONTEXT, "rules/  git · code · sdd · safety · canary (one file per rule)\ntemplates/  AGENTS.md, CLAUDE.md, .harnex.yml, rules.md\nmemory.md  progress and hand-off conventions"),
+        ("context/", CONTEXT, "rules/  git · code · sdd · safety · canary · language (one file per rule)\ntemplates/  AGENTS.md, CLAUDE.md, .harnex.yml, rules.md\nmemory.md  progress and hand-off conventions"),
         ("tools/", TOOLS, "commands/  explore propose apply verify ship\nskills/  setup, update\nmcp/  context7, markitdown, playwright\nprofiles/  python-fastapi, react-vite (stack know-how)"),
         ("orchestration/", ORCH, "workflow.md  the five phases, entry and exit criteria\nroles/  architect, builder, verifier (prompts)\nagents/  builder.md, verifier.md (Claude adapters)\ndecisions/  route.yaml, task-done.yaml (typed questions)"),
         ("control/", CONTROL, "permissions.json  per-role allowlists\nguard/  patterns.yaml, guard.py (PreToolUse hook)\napprovals.md  what always asks you"),
@@ -464,7 +464,7 @@ def layout() -> None:
         b = c.box(620, y, 160, 60, name, bg=bg, size=14)
         c.box(800, y, 560, 60, body, bg=WHITE, size=11)
         c.arrow(plugin, b, "bl", via=[(430, y + 30)]) if i else c.arrow(plugin, b, "rl")
-    c.box(620, 570, 740, 60, "scripts/  decide.py (backend interface: jev | mock), setup.py, update.py — Python, run with uv\n.claude-plugin/plugin.json  name, version",
+    c.box(620, 570, 740, 60, "scripts/  render_rules.py (sets → rules.md), decide.py (jev | mock), setup.py, update.py — Python, uv\n.claude-plugin/plugin.json  name, version",
           bg=NEUTRAL, size=12)
     c.save("07-layout")
 

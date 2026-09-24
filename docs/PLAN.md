@@ -189,7 +189,11 @@ cannot adopt an existing project.
 A rule is a short statement of how work is done that every agent must follow. In harnex a
 rule is one file under `plugin/context/rules/<set>/<rule>.md` with frontmatter `id`,
 `set`, `applies_to` (always, or a profile), `enforced_by` (none, guard, hook, check,
-decision). The body is the rule as an agent reads it, with its reason, in a few lines.
+decision). The body is the rule as an agent reads it, with its reason, in a few lines:
+its first line is a level-one heading that *is* the rule, stated as one sentence, and a
+rule whose `enforced_by` is not `none` carries an `**Enforced by:**` line naming the
+component that enforces it — which is what lets a check walk from a rule to its code and
+back. The format is stated in `plugin/context/rules/README.md`.
 
 Sets in v0.1, all selectable in `setup` and recorded in `.harnex.yml`:
 
@@ -277,11 +281,16 @@ enforces itself. Each is its own OpenSpec change, in this order.
   - `--strict` treats warnings as errors, and two fields are easy to lose: without `author` in `plugin.json` and `metadata.description` in `marketplace.json`, strict fails.
   - `claude plugin marketplace add .` is rejected — the source must be `owner/repo`, a URL, or a `./path`.
 
-#### C1b · rule sets and their rendering
-- **Delivers:** the rule file format (frontmatter `id`, `set`, `applies_to`, `enforced_by`) and the six sets of §7 — `git`, `code`, `sdd`, `safety`, `canary`, `language` — one file per rule under `plugin/context/rules/<set>/`; `plugin/scripts/render_rules.py`, which turns a list of sets into `.harnex/rules.md` deterministically. Pillar 1, with the renderer as its only script.
-- **You try it:** `uv run plugin/scripts/render_rules.py --sets git,code --out -` prints the rules file those two sets produce; add `safety` and the file grows by exactly that set.
-- **Tests:** frontmatter schema validation over every rule file; rendering snapshots for several set combinations; an assertion that a rule whose `enforced_by` is not `none` names its enforcer in its body; the private-names denylist over the rendered output.
-- **Exit:** every rule is stated exactly once, and the same set list always renders the same file, byte for byte.
+#### C1b · rule sets and their rendering — **delivered**, change `rule-sets-and-rendering`
+- **Delivers:** the rule file format (frontmatter `id`, `set`, `applies_to`, `enforced_by`, and a body whose first line is the rule stated as one sentence) and the six sets of §7 — `git`, `code`, `sdd`, `safety`, `canary`, `language`, sixteen rules — one file per rule under `plugin/context/rules/<set>/`, with the format itself stated in `plugin/context/rules/README.md`; `plugin/scripts/render_rules.py`, which turns a list of sets and the project's profiles into `.harnex/rules.md` deterministically. Pillar 1, with the renderer as its only script.
+- **You try it:** `uv run plugin/scripts/render_rules.py --sets git,code --out -` prints the rules file those two sets produce; add `safety` and the file grows by exactly that section, with one header line changed and nothing else moved. Full steps in [smoke.md](smoke.md).
+- **Tests:** the format over every rule file, with fourteen seeded faults each proving the check catches it; the set checks; determinism against a permuted and a repeated set list; one committed snapshot of every set rendered, plus the subset property that a set renders the same beside any other; the private-names denylist over the rendered output as well as the tree.
+- **Exit:** met. Every rule is stated exactly once, and the same set list always renders the same file, byte for byte.
+- **What it taught us:**
+  - The renderer needs **no dependency at all**. Four flat `key: value` fields are parsed by fifteen lines that refuse anything else, and refusing *is* the schema check. That keeps `uv run` instant, which matters once `C1d`'s hook has three seconds to live — and it is why the frontmatter is YAML-shaped rather than YAML.
+  - Determinism is not "the same run twice" but "the same choice, from any direction". Alphabetical sets, alphabetical rules, no timestamp and no version stamp: anything else would make `.harnex/rules.md` look edited to `update` every time the plugin is released, and a harness-owned file that changes for reasons the project did not choose is one `update` can only refuse to touch.
+  - One snapshot plus a property beats several snapshots. "A set renders the same beside any other" holds for every combination, not for the two someone recorded, and it is the property `setup` actually relies on when it offers sets freely.
+  - The redundancy in the format is the check: `id` repeats the file name and `set` repeats the directory, so a rule moved or copied without care is caught before the duplicate statement reaches a project.
 
 #### C1c · setup writes a project
 - **Delivers:** `/harnex:setup` (pillar 2) and `plugin/scripts/setup.py`; the templates for `AGENTS.md`, `CLAUDE.md`, `.harnex.yml`, `.claude/settings.json` and the OpenSpec config; the questions it asks (profiles, features, canary word, decision backend) and the six files it writes, calling C1b's renderer for `.harnex/rules.md`; the hash manifest at `.harnex/state/manifest.json`, written as it writes, which `update` will read in C6.
@@ -347,6 +356,13 @@ surface. Never: an unattended mode.
 14. A phase delivering several independent capabilities is split into lettered changes
     that land in order. C1 is four: `C1a` an installable plugin, `C1b` rule sets and
     their rendering, `C1c` setup writing a project, `C1d` the canary enforcing itself.
+15. Harness scripts depend on the standard library only, so that a hook or a setup step
+    pays nothing to resolve a dependency before it runs. A format that would need a
+    library is the signal to simplify the format, not to take the dependency.
+16. A harness-owned generated file is a pure function of the project's choices: no
+    timestamp, no version stamp, and no dependence on the order an argument was given.
+    Ownership by hash is only workable if the file changes when, and only when, the
+    project's choices or the harness's content change.
 
 ## 12. Open questions
 

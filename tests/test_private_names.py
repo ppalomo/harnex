@@ -68,8 +68,8 @@ def test_the_plugin_publishes_no_private_shape(plugin_root: Path) -> None:
     assert not hits, "private-looking content in the plugin:\n" + "\n".join(hits)
 
 
-def test_the_plugin_publishes_no_personal_term(plugin_root: Path) -> None:
-    """The owner's half. Skipped, visibly, when the personal list is not available."""
+def _personal_patterns() -> list[tuple[str, str]]:
+    """The owner's half. Skips, visibly, when the personal list is not available."""
     location = os.environ.get(DENYLIST_ENV_VAR)
     if not location:
         pytest.skip(
@@ -86,10 +86,36 @@ def test_the_plugin_publishes_no_personal_term(plugin_root: Path) -> None:
         if line.strip() and not line.startswith("#")
     ]
     assert terms, f"{denylist} lists no terms"
+    return [("personal term", re.escape(term)) for term in terms]
 
-    patterns = [("personal term", re.escape(term)) for term in terms]
-    hits = _scan(_published_files(plugin_root), patterns)
+
+def test_the_plugin_publishes_no_personal_term(plugin_root: Path) -> None:
+    hits = _scan(_published_files(plugin_root), _personal_patterns())
     assert not hits, "private names in the plugin:\n" + "\n".join(hits)
+
+
+def _rendered(tmp_path: Path, rules_dir: Path) -> list[Path]:
+    """Every rule the harness holds, rendered as a project would receive it.
+
+    The tree is checked above, but what reaches a project is the rendering, and a
+    renderer is free to add prose of its own. This checks the thing that travels.
+    """
+    import render_rules
+
+    document = render_rules.render(render_rules.available_sets(rules_dir), [], rules_dir)
+    path = tmp_path / "rules.md"
+    path.write_text(document, encoding="utf-8")
+    return [path]
+
+
+def test_the_rendered_rules_publish_no_private_shape(tmp_path: Path, rules_dir: Path) -> None:
+    hits = _scan(_rendered(tmp_path, rules_dir), SHAPE_PATTERNS)
+    assert not hits, "private-looking content in the rendered rules:\n" + "\n".join(hits)
+
+
+def test_the_rendered_rules_publish_no_personal_term(tmp_path: Path, rules_dir: Path) -> None:
+    hits = _scan(_rendered(tmp_path, rules_dir), _personal_patterns())
+    assert not hits, "private names in the rendered rules:\n" + "\n".join(hits)
 
 
 def test_a_seeded_secret_is_detected(plugin_root: Path) -> None:
