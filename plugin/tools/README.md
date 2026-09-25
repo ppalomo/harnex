@@ -22,9 +22,9 @@ The hands: what the agent can actually do, and what it needs installed to do it.
 
 ## What is here
 
-- `../commands/setup.md` and `../skills/harnex-setup/` — the one command that brings a
-  project to a harnessed state, and the procedure it follows: what to ask, in what order,
-  and what counts as a yes.
+- `../skills/setup/` — the one command that brings a project to a harnessed state,
+  `/harnex:setup`, and the procedure it follows: what to ask, in what order, and what
+  counts as a yes.
 - `../scripts/setup.py` — every step of that procedure that touches the filesystem. It
   surveys, plans, refuses while a conflict stands, and writes atomically with the record
   last. The questions belong to the session; the writes belong to the script.

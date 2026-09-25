@@ -38,23 +38,29 @@ plan has already settled:
 
 ## Decisions
 
-### A command asks, a skill holds the procedure, a script does the work
+### A skill asks, a script does the work
 
-`/harnex:setup` is a thin command under `plugin/commands/`; the procedure it follows —
-the questions, in what order, what to show, what counts as a yes — is a skill,
-`plugin/skills/harnex-setup/`; every filesystem step is `plugin/scripts/setup.py`. All three
-are pillar 2.
+`/harnex:setup` is one skill, `plugin/skills/setup/`: the questions, in what order, what to
+show, what counts as a yes. Every filesystem step is `plugin/scripts/setup.py`. Both are
+pillar 2.
 
-The split is what makes the specs testable: the script has two verbs, `plan` and `write`,
-and both take one answers document (`--answers <file|->`) and return a machine-readable
+The plan said a thin command in front of the skill. Installing it showed why not: the host
+lists commands and skills in one inventory, so a command plus a skill is **two components
+for one capability** — `Skills (2) setup, harnex-setup`, two always-on descriptions — and
+the skill, named `setup`, is already invoked as `/harnex:setup`. The command bought the
+name it already had, so it is gone: one component, ~81 always-on tokens, and the host's own
+advice for a new plugin.
+
+The split between the two is what makes the specs testable: the script has three verbs,
+`choices`, `plan` and `write`, and the last two take one answers document (`--answers <file|->`) and return a machine-readable
 result plus the human lines the session prints. `write` re-runs the survey itself and refuses
 if any conflict stands, so an approval given against a stale plan cannot write anything.
 
-Alternatives: everything in the command prompt — nothing testable, and the plan's own
+Alternatives: everything in the skill's prompt — nothing testable, and the plan's own
 sequence would be advice; one script that prompts on a terminal — Claude Code gives it none,
-and the questions belong to the session that can explain them. The skill exists rather than
-folding the procedure into the command because `C6`'s `update` repeats most of it, and a
-procedure stated twice is the thing this repository refuses.
+and the questions belong to the session that can explain them. `choices` exists because the
+skill must offer only what the harness holds, and a prompt cannot discover that on its own
+without reading the tree.
 
 ### What setup writes, and who owns each path
 

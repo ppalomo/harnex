@@ -24,9 +24,9 @@ floor and its entry-level merge). Three components, three pillars, one command.
 
 ## What Changes
 
-- Add `/harnex:setup`: the command asks the questions, a skill holds the procedure, and
-  `plugin/scripts/setup.py` does every deterministic step so the whole sequence is testable
-  without a session. Standard library only, as every harness script is.
+- Add `/harnex:setup`: one skill asks the questions, and `plugin/scripts/setup.py` does
+  every deterministic step, so the whole sequence is testable without a session. Standard
+  library only, as every harness script is.
 - Add the templates for the files a project owns — `AGENTS.md`, `CLAUDE.md`, `.harnex.yml`
   and the OpenSpec config — and the two pointer lines: a sentence in `AGENTS.md` telling a
   tool without an import syntax to read the rules file, and the two `@` imports in
@@ -80,8 +80,7 @@ floor and its entry-level merge). Three components, three pillars, one command.
 
 ## Impact
 
-- New: `plugin/commands/setup.md`, `plugin/skills/harnex-setup/SKILL.md`,
-  `plugin/scripts/setup.py`, `plugin/context/templates/`, `plugin/control/floor.json`, and
+- New: `plugin/skills/setup/SKILL.md`, `plugin/scripts/setup.py`, `plugin/context/templates/`, `plugin/control/floor.json`, and
   the tests for the survey, the plan, the writes, adoption, idempotence, interruption and
   the floor merge.
 - Changed: `plugin/control/README.md` restated and no longer "filled by C4" alone;

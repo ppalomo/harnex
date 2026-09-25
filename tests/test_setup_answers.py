@@ -128,3 +128,31 @@ def test_a_refusal_writes_nothing(project: Path, answers, setup_run) -> None:
     code, said = setup_run("write", project, answers)
     assert code == 1 and "no such set" in said
     assert list(project.iterdir()) == []
+
+
+def test_a_template_with_nothing_to_answer_it_fails_loudly(
+    tmp_path: Path, plugin_root: Path
+) -> None:
+    """A token left in a project's file would be worse than a refusal: the project would
+    carry a placeholder nobody notices."""
+    templates = tmp_path / "plugin" / "context" / "templates"
+    templates.mkdir(parents=True)
+    (templates / "thing.md").write_text("# {{project_name}} and {{nobody}}\n", encoding="utf-8")
+    with pytest.raises(setup.SetupError) as refusal:
+        setup.render_template(tmp_path / "plugin", "thing.md", {"project_name": "a"})
+    assert "nothing answers" in str(refusal.value)
+
+
+def test_a_pointer_file_states_where_it_goes(tmp_path: Path, plugin_root: Path) -> None:
+    for name in ("agents", "claude"):
+        pointer = setup.load_pointer(plugin_root, name)
+        assert pointer.position in ("top", "end")
+        assert pointer.requires and pointer.without
+        assert pointer.present_in(pointer.text)
+
+    templates = tmp_path / "plugin" / "context" / "templates"
+    templates.mkdir(parents=True)
+    (templates / "pointer-nowhere.md").write_text("just a line\n", encoding="utf-8")
+    with pytest.raises(setup.SetupError) as refusal:
+        setup.load_pointer(tmp_path / "plugin", "nowhere")
+    assert "position" in str(refusal.value)

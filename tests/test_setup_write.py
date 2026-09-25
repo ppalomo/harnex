@@ -242,3 +242,46 @@ def test_the_script_runs_as_its_own_process(
     assert finished.returncode == 0, finished.stderr
     assert (project / setup.MANIFEST).is_file()
     assert "Written:" in finished.stdout
+
+
+def test_the_rules_file_is_the_renderer_s_own_output(
+    project: Path, plugin_root: Path, answers, setup_run
+) -> None:
+    """Setup calls the renderer rather than reimplementing any part of it."""
+    import render_rules
+
+    setup_run("write", project, answers)
+    expected = render_rules.render(
+        answers["sets"], answers["profiles"], plugin_root / "context" / "rules"
+    )
+    assert (project / setup.RULES).read_text(encoding="utf-8") == expected
+
+
+def test_the_record_does_not_depend_on_where_the_project_is(
+    tmp_path: Path, answers, setup_run
+) -> None:
+    records = []
+    for name in ("here", "somewhere/else/entirely"):
+        elsewhere = tmp_path / name
+        elsewhere.mkdir(parents=True)
+        setup_run("write", elsewhere, answers)
+        records.append((elsewhere / setup.MANIFEST).read_bytes())
+    assert records[0] == records[1], "the record depends on the path it was written at"
+
+
+def test_the_only_writes_to_a_project_owned_path_are_creation_and_the_approved_line(
+    project: Path, plugin_root: Path, answers
+) -> None:
+    """Prevention, not intention: there is no other branch that writes one of these."""
+    (project / "AGENTS.md").write_text("# Mine\n", encoding="utf-8")
+    (project / "CLAUDE.md").write_text("# Mine\n", encoding="utf-8")
+    answers["approvals"]["pointer_agents"] = True
+
+    plan = setup.build_plan(
+        project, plugin_root, setup.read_answers(json.dumps(answers), plugin_root)
+    )
+    for step in plan.steps:
+        if step.owner == "project" and step.data is not None:
+            assert step.action in (setup.CREATE, setup.INSERT)
+            if step.action == setup.INSERT:
+                assert step.path == "AGENTS.md", "only the approved file is written"

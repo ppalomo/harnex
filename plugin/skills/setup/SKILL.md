@@ -1,5 +1,5 @@
 ---
-name: harnex-setup
+name: setup
 description: Bring a project to a harnessed state — ask what it needs, show the plan, and write only after an explicit yes. Use when setting a project up with the harness for the first time, or when re-running setup after changing the project's choices.
 ---
 
