@@ -11,7 +11,9 @@ exactly one home, and what must never be published inside it.
 
 The repository SHALL publish a plugin catalogue at its root that lists exactly one
 plugin, and that plugin SHALL install into Claude Code from a checkout of the
-repository without any further build step.
+repository without any further build step. Installing it SHALL change nothing about how a
+project behaves until that project has been set up: in a project that has not, every
+component the plugin contributes SHALL be inert.
 
 #### Scenario: Installing from a local checkout
 
@@ -28,9 +30,17 @@ repository without any further build step.
 
 #### Scenario: The plugin does nothing on its own
 
-- **WHEN** the plugin is installed and a session is started
-- **THEN** no command, skill, agent or hook is contributed by it, and the session
-  behaves as it did before the installation
+- **WHEN** the plugin is installed and a session is started in a project holding no record of
+  the harness's choices
+- **THEN** the session behaves as it did before the installation: nothing the plugin
+  contributes acts, nothing is read from the project beyond looking for that record, and no
+  component reports anything
+
+#### Scenario: A session in a harnessed project
+
+- **WHEN** the plugin is installed and a session is started in a project that has been set up
+- **THEN** the components the plugin contributes are available, and each acts only where the
+  project's recorded choices enabled it
 
 ### Requirement: The plugin declares its identity
 
