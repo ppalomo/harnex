@@ -38,6 +38,7 @@ rules:
     - State which phase (C1a-C6) of docs/PLAN.md the change belongs to and its exit criterion
   design:
     - Say what setup or update will write in a target project for this change, and who owns each path
+    - For every guarantee the change makes, say whether it is instruction, prevention or detection, and what happens when the component providing it fails
   tasks:
     - The last task of every change updates docs/PLAN.md to match what landed
 

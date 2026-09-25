@@ -1,48 +1,58 @@
+<div align="center">
+
+<img src="docs/assets/mascot.png" alt="Rex, the harnex mascot: an armoured, neon-wired beast" width="180">
+
 # harnex
 
-A public, reusable **harness** for AI coding agents, used from Claude Code.
+**A public, reusable harness for AI coding agents, used from Claude Code.**
 
-**Agent = Model + Harness.** The model reasons; the harness is everything around it that
-lets it act safely and verifiably: instructions and memory, tools, the agentic loop,
-guardrails, and verification. harnex centralises the generic parts of that so a project
-gets them in one command instead of rebuilding them.
+[![status](https://img.shields.io/badge/status-early-orange)](docs/PLAN.md)
+[![licence](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
+[![Claude Code plugin](https://img.shields.io/badge/Claude%20Code-plugin-8a5cf6)](https://docs.claude.com/en/docs/claude-code)
+[![spec-driven](https://img.shields.io/badge/spec--driven-OpenSpec-22c55e)](https://github.com/Fission-AI/OpenSpec)
 
-> Status: **early**. The plugin installs (`C1a`), and deliberately does nothing yet: no
-> command, no skill, no hook. The full plan, with diagrams, is in
-> [`docs/PLAN.md`](docs/PLAN.md); the manual checks are in [`docs/smoke.md`](docs/smoke.md).
+</div>
 
-## What it will give you
+---
 
-- **Five commands** inside Claude Code — `explore`, `propose`, `apply`, `verify`,
-  `ship` — that run a spec-driven change from idea to pull request. Specs are kept by
-  [OpenSpec](https://github.com/Fission-AI/OpenSpec) underneath; you never call it.
-- **Division of labour.** Claude plans and reviews; [OpenAI Codex](https://developers.openai.com/codex)
-  builds, reached through its official Claude Code plugin; a small **decision model**
-  (TypeSafe's Jev today, swappable) picks which tool and model runs each phase and says
-  so on screen; you approve what is irreversible.
-- **A shell guard** that decides before any command runs: deterministic rules first, the
-  decision model for the ambiguous rest, never a silent allow.
-- **A canary**: every answer must end with a word you choose. When it goes missing, the
-  model has lost its instructions.
-- **Rule sets** (git, code, spec-driven work, safety, language) written once, rendered
-  into each project, and enforced by hooks where they can be.
+> **Agent = Model + Harness.**
+> The model reasons; the harness is everything around it that lets it act safely and
+> verifiably: instructions and memory, tools, the agentic loop, guardrails, and
+> verification. harnex centralises the generic parts of that so a project gets them in
+> one command instead of rebuilding them.
 
-## How it is organised
+> [!NOTE]
+> **Status: early.** The plugin installs (`C1a`) and holds its rule sets and their
+> renderer (`C1b`); it contributes no command, skill or hook yet.
+> The full plan, with diagrams, is in [`docs/PLAN.md`](docs/PLAN.md); the manual checks
+> are in [`docs/smoke.md`](docs/smoke.md).
+
+## ✨ What it will give you
+
+| | |
+|---|---|
+| **Five commands** | `explore`, `propose`, `apply`, `verify`, `ship` — a spec-driven change from idea to pull request, inside Claude Code. Specs are kept by [OpenSpec](https://github.com/Fission-AI/OpenSpec) underneath; you never call it. |
+| **Division of labour** | Claude plans and reviews; [OpenAI Codex](https://developers.openai.com/codex) builds, reached through its official Claude Code plugin; a small **decision model** (TypeSafe's Jev today, swappable) picks which tool and model runs each delegated step and says so on screen; you approve what is irreversible. |
+| **A shell guard** | Decides before any command runs: deterministic rules first, the decision model for the ambiguous rest, never a silent allow on its own error — backed by a permission floor in the project's settings for when the hook itself cannot run. |
+| **A canary** | If you want one: every answer must end with a word you choose. When it goes missing, that instruction was not followed — a cheap sign the rules may have dropped out of the context. |
+| **Rule sets** | Git, code, spec-driven work, safety, language — written once, rendered into each project, and enforced by hooks where they can be. |
+
+## 🧩 How it is organised
 
 A harness has five pillars, and the plugin's directories are the pillars:
 
-| Pillar | Directory | Holds |
-|---|---|---|
-| 1 · Context & Memory | `plugin/context/` | rule sets, instruction templates, progress conventions |
-| 2 · Action & Tools | `plugin/tools/` | MCP declarations, stack profiles |
-| 3 · Orchestration | `plugin/orchestration/` | the workflow, the roles, the decision questions |
-| 4 · Control & Guardrails | `plugin/control/` | permissions, the shell guard, what always asks you |
-| 5 · Feedback & Verification | `plugin/feedback/` | the check command, the canary check, the decision journal |
+| | Pillar | Directory | Holds |
+|---|---|---|---|
+| 1 | Context & Memory | `plugin/context/` | rule sets, instruction templates, progress conventions |
+| 2 | Action & Tools | `plugin/tools/` | MCP declarations, stack profiles |
+| 3 | Orchestration | `plugin/orchestration/` | the workflow, the roles, the decision questions |
+| 4 | Control & Guardrails | `plugin/control/` | permissions, the shell guard, what always asks you |
+| 5 | Feedback & Verification | `plugin/feedback/` | the check command, the canary check, the decision journal |
 
 The commands, skills, agents and hooks that Claude Code loads sit at the plugin root, as
 Claude Code expects; each one belongs to one pillar.
 
-## Installing it (planned)
+## 📦 Installing it (planned)
 
 Once per machine:
 
@@ -52,19 +62,36 @@ claude plugin install harnex@harnex
 claude plugin install codex@openai-codex
 ```
 
-Once per project, from inside Claude Code: `/harnex:setup`. It asks a few questions and
-writes six small files (`AGENTS.md` if missing, `CLAUDE.md`, `.harnex.yml`,
-`.harnex/rules.md`, `.claude/settings.json`, `openspec/config.yaml`). Later,
-`claude plugin update harnex` refreshes the behaviour and `/harnex:update` refreshes the
-harness-owned files without touching yours.
+Once per project, new or existing, from inside Claude Code:
 
-## Developing harnex
+```
+/harnex:setup
+```
+
+It asks a few questions, shows you a plan and writes only after your yes: `.harnex.yml`,
+`.harnex/rules.md`, `.harnex/manifest.json`, a permission floor merged into
+`.claude/settings.json`, and — only where they are missing — `AGENTS.md`, `CLAUDE.md` and
+`openspec/config.yaml`. Files you already have stay yours; setup asks before adding the
+one pointer line each needs.
+
+Later, `claude plugin update harnex` refreshes the behaviour and `/harnex:update`
+refreshes the harness-owned files without touching yours. In a project that never ran
+setup, the plugin does nothing.
+
+## 🛠 Developing harnex
 
 harnex develops itself with its own method: every phase of the plan is one OpenSpec
 change under `openspec/`. Working rules for agents are in [`AGENTS.md`](AGENTS.md).
 Diagrams are generated by `docs/diagrams/build.py`.
 
+```bash
+uv run --with pytest pytest          # layout, privacy and manifest checks
+python3 docs/diagrams/build.py       # regenerate the diagrams
+```
+
 Contributions: issues are welcome; pull requests after v0.1.
+
+<br clear="left">
 
 ## Licence
 

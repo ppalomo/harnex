@@ -321,6 +321,10 @@
     {
      "id": "a32",
      "type": "arrow"
+    },
+    {
+     "id": "a41",
+     "type": "arrow"
     }
    ],
    "updated": 1,
@@ -558,10 +562,6 @@
     {
      "id": "a34",
      "type": "arrow"
-    },
-    {
-     "id": "a41",
-     "type": "arrow"
     }
    ],
    "updated": 1,
@@ -667,11 +667,11 @@
    "roughness": 1,
    "opacity": 100,
    "angle": 0,
-   "x": 623.6,
+   "x": 617.0,
    "y": 332.5,
    "strokeColor": "#1e1e1e",
    "backgroundColor": "transparent",
-   "width": 192.8,
+   "width": 206.00000000000003,
    "height": 45.0,
    "seed": 1251976313,
    "groupIds": [],
@@ -681,8 +681,8 @@
    "updated": 1,
    "link": null,
    "locked": false,
-   "text": "task.done?\nexit code = fact\nscope check = decision model",
-   "originalText": "task.done?\nexit code = fact\nscope check = decision model",
+   "text": "accept? (facts)\nexit code \u00b7 paths \u2286 declared \u00b7\nprotected paths \u00b7 refs unmoved",
+   "originalText": "accept? (facts)\nexit code \u00b7 paths \u2286 declared \u00b7\nprotected paths \u00b7 refs unmoved",
    "fontSize": 12,
    "fontFamily": 1,
    "textAlign": "center",
@@ -746,12 +746,12 @@
    "roughness": 1,
    "opacity": 100,
    "angle": 0,
-   "x": 347.35,
-   "y": 338.75,
+   "x": 350.925,
+   "y": 330.625,
    "strokeColor": "#1e1e1e",
    "backgroundColor": "transparent",
-   "width": 165.3,
-   "height": 32.5,
+   "width": 158.15,
+   "height": 48.75,
    "seed": 1257440635,
    "groupIds": [],
    "frameId": null,
@@ -760,8 +760,8 @@
    "updated": 1,
    "link": null,
    "locked": false,
-   "text": "evidence reported:\nwhat ran, what changed",
-   "originalText": "evidence reported:\nwhat ran, what changed",
+   "text": "apply ticks tasks.md;\nevidence bound to the\ntree fingerprint",
+   "originalText": "apply ticks tasks.md;\nevidence bound to the\ntree fingerprint",
    "fontSize": 13,
    "fontFamily": 1,
    "textAlign": "center",
@@ -900,11 +900,11 @@
    "roughness": 1,
    "opacity": 100,
    "angle": 0,
-   "x": 978.8,
+   "x": 957.35,
    "y": 488.75,
    "strokeColor": "#1e1e1e",
    "backgroundColor": "transparent",
-   "width": 122.4,
+   "width": 165.3,
    "height": 32.5,
    "seed": 285990743,
    "groupIds": [],
@@ -914,8 +914,8 @@
    "updated": 1,
    "link": null,
    "locked": false,
-   "text": "retry once with\nthe check output",
-   "originalText": "retry once with\nthe check output",
+   "text": "builder fixes once,\ngiven the check output",
+   "originalText": "builder fixes once,\ngiven the check output",
    "fontSize": 13,
    "fontFamily": 1,
    "textAlign": "center",
@@ -1774,12 +1774,12 @@
    "roughness": 1,
    "opacity": 100,
    "angle": 0,
-   "x": 1040.0,
-   "y": 470,
+   "x": 1160,
+   "y": 505.0,
    "strokeColor": "#1e1e1e",
    "backgroundColor": "transparent",
-   "width": 80.0,
-   "height": 80,
+   "width": 150,
+   "height": 435.0,
    "seed": 776492205,
    "groupIds": [],
    "frameId": null,
@@ -1792,16 +1792,20 @@
    "locked": false,
    "points": [
     [
-     0.0,
-     0
+     0,
+     0.0
     ],
     [
-     80.0,
-     -30
+     150,
+     0.0
     ],
     [
-     80.0,
-     -80
+     150,
+     -435.0
+    ],
+    [
+     80,
+     -435.0
     ]
    ],
    "startBinding": {
@@ -1810,7 +1814,7 @@
     "gap": 4
    },
    "endBinding": {
-    "elementId": "r14",
+    "elementId": "r8",
     "focus": 0,
     "gap": 4
    },
@@ -1892,7 +1896,7 @@
    "y": 436,
    "strokeColor": "#1e1e1e",
    "backgroundColor": "transparent",
-   "width": 100.4,
+   "width": 87.2,
    "height": 30.0,
    "seed": 386046158,
    "groupIds": [],
@@ -1902,8 +1906,8 @@
    "updated": 1,
    "link": null,
    "locked": false,
-   "text": "failed twice /\nout of scope",
-   "originalText": "failed twice /\nout of scope",
+   "text": "fix failed /\nout of scope",
+   "originalText": "fix failed /\nout of scope",
    "fontSize": 12,
    "fontFamily": 1,
    "textAlign": "left",
@@ -1929,8 +1933,8 @@
    "y": 470,
    "strokeColor": "#1e1e1e",
    "backgroundColor": "transparent",
-   "width": 408.40000000000003,
-   "height": 52.5,
+   "width": 446.90000000000003,
+   "height": 70.0,
    "seed": 1674671377,
    "groupIds": [],
    "frameId": null,
@@ -1939,8 +1943,8 @@
    "updated": 1,
    "link": null,
    "locked": false,
-   "text": "Rules the builder keeps (stated in .harnex/rules.md,\nenforced by the guard): never tick tasks.md,\nnever commit, never widen the task's scope.",
-   "originalText": "Rules the builder keeps (stated in .harnex/rules.md,\nenforced by the guard): never tick tasks.md,\nnever commit, never widen the task's scope.",
+   "text": "The builder's limits in v0.1 are instruction plus\ndetection before acceptance: it never ticks tasks.md,\nnever commits, never leaves its declared paths.\nPrevention only where the guard or Codex's sandbox reach.",
+   "originalText": "The builder's limits in v0.1 are instruction plus\ndetection before acceptance: it never ticks tasks.md,\nnever commits, never leaves its declared paths.\nPrevention only where the guard or Codex's sandbox reach.",
    "fontSize": 14,
    "fontFamily": 1,
    "textAlign": "left",
@@ -1966,8 +1970,8 @@
    "y": 580,
    "strokeColor": "#1e1e1e",
    "backgroundColor": "transparent",
-   "width": 362.20000000000005,
-   "height": 35.0,
+   "width": 416.1,
+   "height": 52.5,
    "seed": 175782304,
    "groupIds": [],
    "frameId": null,
@@ -1976,8 +1980,8 @@
    "updated": 1,
    "link": null,
    "locked": false,
-   "text": "Manual mode: you watch each step and can stop.\nNo unattended mode is planned.",
-   "originalText": "Manual mode: you watch each step and can stop.\nNo unattended mode is planned.",
+   "text": "Every transition is recorded in .harnex/state/apply/;\nan interrupted run resumes from it or asks you.\nNo unattended mode is planned.",
+   "originalText": "Every transition is recorded in .harnex/state/apply/;\nan interrupted run resumes from it or asks you.\nNo unattended mode is planned.",
    "fontSize": 14,
    "fontFamily": 1,
    "textAlign": "left",

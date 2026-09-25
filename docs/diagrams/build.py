@@ -193,7 +193,7 @@ def overview() -> None:
         ("3 · Orchestration\n(nervous system)", ORCH,
          "workflow: explore →\npropose → apply →\nverify → ship\nroles: architect, builder,\nverifier · decision routing"),
         ("4 · Control\n(immune system)", CONTROL,
-         "permissions per role\nshell guard hook\nhuman approvals\n(commit, push, destructive)"),
+         "permission floor\n(settings.json)\nshell guard hook\nhuman approvals\n(commit, push, destructive)"),
         ("5 · Feedback\n(vitals)", FEEDBACK,
          "check command\nverifier (fresh context)\ncanary check hook\ndecision journal"),
     ]
@@ -209,7 +209,7 @@ def overview() -> None:
                      "… and ENFORCED by a hook or a check (pillars 4, 5)", bg=CONTROL, size=15)
     c.arrow(stated, enforced, "rl")
     c.label(hx + 300, hy + 340, "the rule file names its enforcer", size=13)
-    c.label(hx + 20, hy + 450, "Example: 'every answer ends with the canary word' is a rule in .harnex/rules.md\nand a Stop hook that warns when the word is missing. When it goes missing, the model has lost its instructions.", size=14)
+    c.label(hx + 20, hy + 450, "Example: 'every answer ends with the canary word' is a rule in .harnex/rules.md\nand a Stop hook that warns when the word is missing: a sign that the rules may have dropped out of the context.", size=14)
 
     c.arrow(model, harness, "rl")
     c.label(300, 250, "reasons,\ndecides", size=13)
@@ -246,10 +246,10 @@ def architecture() -> None:
 
     # column 3: a project
     proj = c.frame(960, 120, 330, 560, "a project (any stack)")
-    p1 = c.box(980, 170, 290, 70, "AGENTS.md — yours, never touched\nCLAUDE.md — @AGENTS.md + rules", bg=CONTEXT, size=13)
+    p1 = c.box(980, 170, 290, 70, "AGENTS.md, CLAUDE.md — yours;\nsetup asks for one pointer line each", bg=CONTEXT, size=13)
     p2 = c.box(980, 260, 290, 90, ".harnex.yml — your choices:\nprofiles, features, canary word,\ndecision model backend", bg=CONTEXT, size=13)
-    p3 = c.box(980, 370, 290, 70, ".harnex/rules.md — harness-owned,\nrendered from the rule sets you chose", bg=CONTEXT, size=13)
-    p4 = c.box(980, 460, 290, 70, ".claude/settings.json — permissions\n(harness-owned)", bg=CONTROL, size=13)
+    p3 = c.box(980, 370, 290, 70, ".harnex/rules.md + manifest.json —\nharness-owned, committed", bg=CONTEXT, size=13)
+    p4 = c.box(980, 460, 290, 70, ".claude/settings.json — permission\nfloor, merged by entry", bg=CONTROL, size=13)
     p5 = c.box(980, 550, 290, 100, "openspec/ — specs and changes\n(the commands drive it;\nyou never call openspec)", bg=ORCH, size=13)
 
     # column 4: services
@@ -307,9 +307,9 @@ def workflow() -> None:
     for b in boxes:
         c.arrow(dm, b, "bt", dashed=True)
 
-    guard = c.box(40, 560, 640, 70, "SHELL GUARD — before every command the agent runs:\ndeterministic rules first, decision model for the ambiguous rest, never a silent allow",
+    guard = c.box(40, 560, 640, 70, "SHELL GUARD — before every command the agent runs: deterministic rules first, decision model\nfor the rest, never a silent allow on its own error; a permission floor covers a failed hook",
                   bg=CONTROL, size=12)
-    canary = c.box(720, 560, 640, 70, "CANARY — after every answer:\nit must end with the canary word; a Stop hook warns when it is missing = instructions lost",
+    canary = c.box(720, 560, 640, 70, "CANARY — after every answer, when the canary set is on: a Stop hook warns\nif the word is missing, a sign the rules may have dropped out of the context",
                    bg=FEEDBACK, size=12)
     c.label(40, 650, "Human gates: choosing a direction (explore), approving the plan (propose), any commit or push (ship), any destructive command (guard).", size=14)
     c.save("03-workflow")
@@ -326,10 +326,10 @@ def apply() -> None:
     claude = c.box(1000, 120, 240, 60, "Claude builder subagent\n(worktree, no commit)", bg=TOOLS, size=13)
     human = c.box(1000, 200, 240, 60, "you (credentials,\ndeploys, deletions)", bg=ACTOR, size=13)
     check = c.box(1000, 320, 240, 70, "run the project's\ncheck command", bg=FEEDBACK, size=14)
-    done = c.box(600, 320, 240, 70, "task.done?\nexit code = fact\nscope check = decision model", bg=FEEDBACK, size=12)
-    evidence = c.box(320, 320, 220, 70, "evidence reported:\nwhat ran, what changed", bg=WHITE, size=13)
+    done = c.box(600, 320, 240, 70, "accept? (facts)\nexit code · paths ⊆ declared ·\nprotected paths · refs unmoved", bg=FEEDBACK, size=12)
+    evidence = c.box(320, 320, 220, 70, "apply ticks tasks.md;\nevidence bound to the\ntree fingerprint", bg=WHITE, size=13)
     escalate = c.box(600, 470, 240, 70, "escalate to architect\n(rewrite task or design)", bg=CONTROL, size=13)
-    retry = c.box(920, 470, 240, 70, "retry once with\nthe check output", bg=CONTROL, size=13)
+    retry = c.box(920, 470, 240, 70, "builder fixes once,\ngiven the check output", bg=CONTROL, size=13)
 
     c.arrow(start, task, "rl")
     c.arrow(task, route, "rl")
@@ -348,12 +348,12 @@ def apply() -> None:
     c.label(440, 270, "next task", size=12)
     c.arrow(done, retry, "bl", via=[(720, 430), (880, 430), (880, 505)])
     c.label(740, 408, "check failed", size=12)
-    c.arrow(retry, check, "tb", via=[(1120, 440)])
+    c.arrow(retry, codex, "rr", via=[(1310, 505), (1310, 70)])
     c.arrow(done, escalate, "bt", via=[(660, 430)])
-    c.label(500, 436, "failed twice /\nout of scope", size=12)
+    c.label(500, 436, "fix failed /\nout of scope", size=12)
 
-    c.label(40, 470, "Rules the builder keeps (stated in .harnex/rules.md,\nenforced by the guard): never tick tasks.md,\nnever commit, never widen the task's scope.", size=14)
-    c.label(40, 580, "Manual mode: you watch each step and can stop.\nNo unattended mode is planned.", size=14)
+    c.label(40, 470, "The builder's limits in v0.1 are instruction plus\ndetection before acceptance: it never ticks tasks.md,\nnever commits, never leaves its declared paths.\nPrevention only where the guard or Codex's sandbox reach.", size=14)
+    c.label(40, 580, "Every transition is recorded in .harnex/state/apply/;\nan interrupted run resumes from it or asks you.\nNo unattended mode is planned.", size=14)
     c.save("04-apply")
 
 
@@ -386,8 +386,8 @@ def guard() -> None:
     c.arrow(dm, o_dm, "rl")
     c.arrow(dm, o_fail, "rl", dashed=True, via=[(860, 500), (860, 560)])
 
-    c.label(40, 230, "Why this order:\n• a regex on 'rm -rf' is more reliable than\n  any model and costs nothing\n• DENY never comes from the model alone\n• the hook never fails open: any error → ASK\n• rules with enforced_by: guard feed the\n  three pattern lists", size=14)
-    c.label(40, 430, "Codex side: the codex plugin runs Codex under\nits own sandbox. A Codex hook with the same\nscript is a later feature.", size=14)
+    c.label(40, 230, "Why this order:\n• a regex on 'rm -rf' is more reliable than\n  any model and costs nothing\n• DENY never comes from the model alone\n• the script never allows on its own error → ASK\n• if the hook itself fails, Claude Code falls\n  back to its permissions: the floor in\n  settings.json still denies or asks\n• rules with enforced_by: guard feed the\n  three pattern lists", size=14)
+    c.label(40, 470, "Codex side: the codex plugin runs Codex under\nits own sandbox. A Codex hook with the same\nscript is a later feature.", size=14)
     c.save("05-guard")
 
 
@@ -395,32 +395,35 @@ def roadmap() -> None:
     c = Canvas()
     c.label(40, 20, "Roadmap — one capability per change, each one you can try yourself", size=28)
     caps = [
-        ("C1a · installable plugin", TOOLS,
+        ("C1a · plugin (delivered)", TOOLS,
          "catalogue + plugin.json,\nthe five pillar directories,\ndocs/smoke.md",
-         "marketplace add . , install,\n/plugin → harnex is listed\nwith its version"),
-        ("C1b · rule sets", CONTEXT,
+         "marketplace add ./ , install,\n/plugin → harnex is listed\nwith its version"),
+        ("C1b · rules (delivered)", CONTEXT,
          "rule file format, the six sets,\nrender_rules.py → .harnex/rules.md",
          "render --sets git,code → see\nthe file; add safety → it grows\nby exactly that set"),
         ("C1c · setup", TOOLS,
-         "/harnex:setup, the templates,\nthe six project files,\nthe hash manifest",
-         "run setup in a scratch project,\nread the six files; run it again\n→ nothing changes"),
+         "/harnex:setup: survey, plan,\nwrite after yes; adoption;\nfloor; committed manifest",
+         "empty project and an existing\none; run again → nothing to do;\nyour files untouched"),
         ("C1d · canary", FEEDBACK,
-         "transcript spike first, then\ncanary.py + the Stop hook,\nword read from .harnex.yml",
-         "ask anything → answer ends\nwith your word; delete the rule\n→ the hook warns"),
+         "canary.py + Stop hook,\nactive only with the canary\nset in .harnex.yml",
+         "answer ends with your word;\ndelete the rule → warns;\nno set → silence"),
+        ("S1 · spike: Codex", NEUTRAL,
+         "delegation, branch, job\nrecovery, sandbox and .git;\nbefore C2",
+         "answers recorded in\ndocs/decisions/ with\ntheir transcripts"),
         ("C2 · explore + propose", ORCH,
-         "the two architect commands,\ndecision model client\n(mock + jev backends),\nrouting line on screen",
+         "the two architect commands,\ndecision client (mock, jev),\nadvice line on screen,\nminimal read-only verifier",
          "run /harnex:explore 'idea',\nthen /harnex:propose →\nsee 'Decision:' and the\nartifacts appear"),
         ("C3 · apply via Codex", TOOLS,
-         "spike the codex plugin first;\nbuilder role, profiles moved,\ntask loop with evidence",
+         "builder role, profiles,\nloop: facts, one fix,\nrun state, recovery",
          "propose a 2-task change,\nrun /harnex:apply, watch\nCodex build, check green"),
         ("C4 · shell guard", CONTROL,
          "PreToolUse hook: allowlist,\ndeny, ask, decision-model\nresidue, journal",
-         "ask Claude to rm -rf /tmp/x\n→ denied; ls → silent;\ngit push → asks you"),
+         "rm -rf /tmp/x → denied;\nls → silent; git push → asks;\nbreak the hook → floor asks"),
         ("C5 · verify + ship", FEEDBACK,
-         "verifier subagent (fresh\ncontext), optional /codex:review,\ncommit after yes, PR, archive",
+         "verifier + Playwright,\noptional /codex:review,\ncommit after yes, PR, archive",
          "finish the C3 change end\nto end and open the PR"),
         ("C6 · update & release", NEUTRAL,
-         "/harnex:update, plugin\nversioning + tags, README,\n'verified against' table,\nfirst real project migrated",
+         "/harnex:update on the C1c\ncontract, tags, README,\n'verified against', CI,\na real project migrated",
          "change a rule in harnex,\nrun update in the project,\nonly rules.md changes"),
     ]
     bw, gap = 176, 10
@@ -453,9 +456,9 @@ def layout() -> None:
 
     items = [
         ("context/", CONTEXT, "rules/  git · code · sdd · safety · canary · language (one file per rule)\ntemplates/  AGENTS.md, CLAUDE.md, .harnex.yml, rules.md\nmemory.md  progress and hand-off conventions"),
-        ("tools/", TOOLS, "commands/  explore propose apply verify ship\nskills/  setup, update\nmcp/  context7, markitdown, playwright\nprofiles/  python-fastapi, react-vite (stack know-how)"),
-        ("orchestration/", ORCH, "workflow.md  the five phases, entry and exit criteria\nroles/  architect, builder, verifier (prompts)\nagents/  builder.md, verifier.md (Claude adapters)\ndecisions/  route.yaml, task-done.yaml (typed questions)"),
-        ("control/", CONTROL, "permissions.json  per-role allowlists\nguard/  patterns.yaml, guard.py (PreToolUse hook)\napprovals.md  what always asks you"),
+        ("tools/", TOOLS, "mcp/  context7, markitdown, playwright\nprofiles/  python-fastapi, react-vite (stack know-how)\nthe only place technologies are named"),
+        ("orchestration/", ORCH, "workflow.md  the five phases, entry and exit criteria\nroles/  architect, builder, verifier (prompts)\ndecisions/  phase.route, task.route, task.scope (YAML)"),
+        ("control/", CONTROL, "floor.json  the permission floor setup merges into settings\nguard/  patterns.yaml, guard.py (PreToolUse hook)\napprovals.md  what always asks you"),
         ("feedback/", FEEDBACK, "check-command.md  the contract a project declares\ncanary/  canary.py (Stop hook)\njournal/  decision journal format"),
     ]
     prev = plugin
@@ -464,7 +467,7 @@ def layout() -> None:
         b = c.box(620, y, 160, 60, name, bg=bg, size=14)
         c.box(800, y, 560, 60, body, bg=WHITE, size=11)
         c.arrow(plugin, b, "bl", via=[(430, y + 30)]) if i else c.arrow(plugin, b, "rl")
-    c.box(620, 570, 740, 60, "scripts/  render_rules.py (sets → rules.md), decide.py (jev | mock), setup.py, update.py — Python, uv\n.claude-plugin/plugin.json  name, version",
+    c.box(620, 570, 740, 60, "at the plugin root, where Claude Code reads them (each piece belongs to one pillar): commands/ (5) · skills/ (setup, update)\nagents/ (builder, verifier) · hooks/ · scripts/ (render_rules, decide, setup, update) · .claude-plugin/plugin.json",
           bg=NEUTRAL, size=12)
     c.save("07-layout")
 
