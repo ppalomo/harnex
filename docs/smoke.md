@@ -150,3 +150,143 @@ the same choice.
   the same body under its set, with the statement as a heading and the frontmatter gone.
   The `**Enforced by:**` line survives: it names the canary check of pillar 5, which
   `C1d` builds. Nothing enforces anything yet, and that is the right order.
+
+---
+
+## setup-writes-a-project (C1c)
+
+**Delivers:** `/harnex:setup` — one command that brings a project, empty or already
+working, to a harnessed state: the files it owns, the ones it only offers, the permission
+floor merged entry by entry, and the committed record that makes all of it refreshable
+later. Nothing project-owned changes without an explicit yes, and a second run changes
+nothing at all.
+
+**Verified against:** Claude Code 2.1.269 (permission syntax and rule order, plugin
+manifest and `${CLAUDE_PLUGIN_ROOT}`), OpenSpec 1.11.0, Python 3.13 through `uv`.
+
+**Steps**
+
+1. Install the plugin from your checkout, if it is not installed already, and confirm what
+   it now contributes:
+   ```bash
+   claude plugin marketplace add ./
+   claude plugin install harnex@harnex
+   claude plugin details harnex
+   ```
+2. Make an empty scratch project and open a session in it:
+   ```bash
+   mkdir -p /tmp/harnex-scratch && cd /tmp/harnex-scratch && git init -q
+   claude
+   ```
+3. Run `/harnex:setup`. Answer the questions: accept the directory name, keep all six
+   sets, accept the proposed canary word, choose `mock`, and give any check command.
+   **Read the plan it prints before you say yes.** Then say yes.
+4. Read what landed, in this order:
+   ```bash
+   cat AGENTS.md CLAUDE.md .harnex.yml
+   head -20 .harnex/rules.md
+   cat .harnex/manifest.json
+   cat .claude/settings.json
+   cat .harnex/state/.gitignore
+   git status --short --untracked-files=all
+   ```
+5. Run `/harnex:setup` again in the same session and read the plan.
+6. Leave the session. Prove the same sequence from the script, which is what the command
+   drives, and prove what it refuses:
+   ```bash
+   cd ~/Developer/harnex     # your checkout
+   cat > /tmp/harnex-answers.json <<'JSON'
+   {"project_name": "scratch", "profiles": [], "sets": ["git", "code", "sdd", "safety", "canary", "language"],
+    "features": [], "canary": "Hullaballoo!", "decision_model": "mock", "check_command": "make check",
+    "approvals": {"pointer_agents": false, "pointer_claude": false, "adopt": []}}
+   JSON
+   uv run plugin/scripts/setup.py choices
+   uv run plugin/scripts/setup.py plan --answers /tmp/harnex-answers.json --project /tmp/harnex-scratch
+   echo "rules I wrote by hand" > /tmp/harnex-scratch/.harnex/rules.md
+   uv run plugin/scripts/setup.py write --answers /tmp/harnex-answers.json --project /tmp/harnex-scratch; echo "exit $?"
+   git -C /tmp/harnex-scratch status --short
+   ```
+7. Restore the file the harness owns, by adopting it, and check the tree afterwards:
+   ```bash
+   python3 - <<'PY'
+   import json, pathlib
+   p = pathlib.Path("/tmp/harnex-answers.json"); a = json.loads(p.read_text())
+   a["approvals"]["adopt"] = [".harnex/rules.md"]; p.write_text(json.dumps(a))
+   PY
+   uv run plugin/scripts/setup.py write --answers /tmp/harnex-answers.json --project /tmp/harnex-scratch
+   git -C /tmp/harnex-scratch status --short
+   ```
+8. Now an existing project. Copy one of your own — or build one that looks like one — and
+   set it up:
+   ```bash
+   rm -rf /tmp/harnex-existing && mkdir -p /tmp/harnex-existing/.claude
+   cd /tmp/harnex-existing && git init -q
+   printf '# My project\n\nIt does a thing.\n' > AGENTS.md
+   printf '# My project\n\nRead AGENTS.md.\n' > CLAUDE.md
+   printf 'build/\n' > .gitignore
+   cat > .claude/settings.json <<'JSON'
+   {"permissions": {"allow": ["Bash(git *)"], "deny": ["Read(./secret.txt)"]}, "env": {"MY_VAR": "1"}}
+   JSON
+   git add -A && git commit -qm "before the harness"
+   claude
+   ```
+   Run `/harnex:setup`, read the notices, say **no** to the pointer line in `AGENTS.md`
+   and **yes** to the one in `CLAUDE.md`, and approve the plan. Then:
+   ```bash
+   git diff --stat
+   git diff .claude/settings.json | head -30
+   git diff AGENTS.md
+   ```
+9. Run setup once more in that project and read the notices.
+10. A fresh clone of the scratch project:
+    ```bash
+    cd /tmp/harnex-scratch && git add -A && git commit -qm "harnessed"
+    git clone -q /tmp/harnex-scratch /tmp/harnex-clone
+    cd ~/Developer/harnex
+    uv run plugin/scripts/setup.py plan --answers /tmp/harnex-answers.json --project /tmp/harnex-clone
+    ```
+11. Run the repository's own checks, then again with your personal denylist:
+    ```bash
+    uv run --with pytest pytest -q -rs
+    HARNEX_DENYLIST=~/.harnex-denylist uv run --with pytest pytest -q -rs
+    ```
+12. Tidy up: `rm -rf /tmp/harnex-scratch /tmp/harnex-existing /tmp/harnex-clone /tmp/harnex-answers.json`.
+
+**Expect**
+
+- Step 1: harnex `0.1.0` with **1 skill (`setup`), 0 agents, 0 hooks, 0 MCP servers** and
+  ~81 tokens always-on. One capability, one component: the host lists commands and skills in
+  the same inventory, so `/harnex:setup` is the skill itself.
+  Nothing else changed in any project you open: the plugin still does nothing until a
+  project has been set up.
+- Step 3: the questions come in the order the skill states, and **profiles and features are
+  never asked about** — the harness holds none yet, so there is nothing to offer. The plan
+  prints one line per path, eight of them, all `create`, and says that nothing has been
+  written yet.
+- Step 4: `AGENTS.md` is a brief with your check command in it and a `## Rules` section
+  pointing at `.harnex/rules.md`; `CLAUDE.md` starts with the two `@` imports; `.harnex.yml`
+  holds your seven answers, flat; the record holds a `sha256` for each of the two paths the
+  harness owns and the exact permission entries it wrote; `.claude/settings.json` has 6
+  `deny` and 36 `ask` entries and nothing else; `git status` shows the new files and
+  **nothing under `.harnex/state/`** — the directory ignores itself, and your `.gitignore`
+  was never touched.
+- Step 5: "Nothing to do: this project is already set up as these answers describe." No
+  file changes, the record included.
+- Step 6: `choices` lists the six sets, empty profiles and features, the two backends and
+  the proposed word. The first `plan` reports every path as `keep` or `unchanged`. After the
+  rules file is edited by hand, `write` **exits 1**, names the file, says it was edited
+  after the harness wrote it, and offers adoption — and `git status` proves nothing else was
+  written.
+- Step 7: adoption replaces only that file, and the tree is clean again.
+- Step 8: `git diff --stat` shows `CLAUDE.md` and `.claude/settings.json` and nothing else.
+  `AGENTS.md` is **byte-identical** — you declined, so nothing was inserted. The settings
+  diff adds the floor's entries and leaves `Read(./secret.txt)`, `Bash(git *)` and `env`
+  exactly as they were. The notices told you that your `Bash(git *)` allow covers floor
+  entries and has no effect on them, because the host resolves deny, then ask, then allow.
+- Step 9: the notice about `AGENTS.md` is repeated, word for word. A declined line is not
+  remembered anywhere — its absence is what brings the notice back.
+- Step 10: the clone is recognised from the committed record: every committed path is
+  `unchanged`, and the only thing to write is `.harnex/state/.gitignore`, which is
+  deliberately not committed. It asks nothing.
+- Step 11: every check passes. Without the environment variable, four checks skip and say
+  which half did not run.

@@ -170,8 +170,8 @@ harnex/
   .claude-plugin/marketplace.json     catalogue with one entry: the harnex plugin
   plugin/                             THE CLAUDE CODE PLUGIN — what a machine installs
     .claude-plugin/plugin.json          name, version
-    commands/                           explore, propose, apply, verify, ship (pillar 2)
-    skills/                             setup, update (pillar 2)
+    commands/                           explore, propose, apply, verify, ship (pillar 2) — but see below
+    skills/                             setup, update (pillar 2) — setup landed in C1c as a skill, no command
     agents/                             builder.md, verifier.md (Claude adapters of the roles, pillar 3)
     hooks/hooks.json                    guard (PreToolUse Bash), canary (Stop, SubagentStop) — inert without .harnex.yml
     context/                            1 · rules/ (one file per rule, grouped in sets), templates/ (AGENTS.md,
@@ -185,6 +185,11 @@ harnex/
   openspec/                           harnex's own specs and changes
   tests/  pytest.ini                  harnex's own checks: the layout, the private names, the manifests
 ```
+
+`C1c` learned that the host lists commands and skills in one inventory, so a command whose
+only job is to invoke a skill of the same name is one component too many: the five workflow
+commands are expected to land as skills for the same reason, and `commands/` stays in this
+layout only for a command that would do something a skill cannot.
 
 Rules that keep it honest: a component lives in exactly one pillar directory; technologies
 are named only in `tools/profiles/`; nothing committed names a project, its vocabulary, a
@@ -236,10 +241,13 @@ permissions from that single file, and a plugin cannot ship permission rules (on
 agents, skills, commands and MCP), so the permission floor of §9 has to live there. It is
 merged as JSON by entry, never as text: setup adds the floor's entries to
 `permissions.deny` and `permissions.ask`, records exactly those entries in the manifest,
-and leaves every other entry alone. A project entry that contradicts a floor entry — an
-`allow` covering a command the floor asks about — is reported as a conflict, not
-resolved. This is the only exception to ownership by file, and it is ownership by entry,
-recorded, not a merge by guesswork.
+and leaves every other entry alone. A project entry that covers what the floor asks about is
+**reported, not resolved and not a conflict**: the host resolves deny, then ask, then
+allow, and no allow carves an exception out of either, so the floor still applies and the
+person is simply told their entry is inert for those commands
+([the decision note](decisions/2026-09-25-the-permission-floor-in-the-hosts-syntax.md)).
+This is the only exception to ownership by file, and it is ownership by entry, recorded,
+not a merge by guesswork.
 
 **Setup plans first, writes after your yes.** Setup never writes while it is still
 learning what is there:
@@ -248,8 +256,8 @@ learning what is there:
    in the manifest); project-owned and present; or **foreign** — a harness-owned path that
    exists but that the harness did not write.
 2. **Plan**: print, per path, create / keep / insert pointer line (asks) / merge entries /
-   conflict. A foreign `.harnex/rules.md` or a contradicting settings entry is a
-   conflict.
+   adopt / conflict. A foreign `.harnex/rules.md`, a settings file that cannot be read as
+   JSON, or a harness-owned path present with no record accounting for it is a conflict.
 3. **Stop on any conflict** before writing anything. You resolve it — move the file, or
    tell setup to adopt it, which replaces it after showing you the diff — and run setup
    again.
@@ -271,8 +279,10 @@ Update, whenever harnex changes: `claude plugin update harnex` refreshes the beh
   writing, writes each file atomically, and writes the manifest last. Run it again after
   an interruption: a file whose hash matches either the manifest or the new rendering is
   safe — already old or already new — and anything else is an edit and stops it.
-- **A fresh clone works**, because the manifest is committed. A project with harness files
-  but no manifest — deleted, or harnessed by hand — is not guessed at: update refuses and
+- **A fresh clone works**, because the manifest is committed: every committed path is
+  recognised unchanged and nothing is asked. The one path a clone is missing is the runtime
+  state location, which is deliberately not committed, so that is the one thing it restores.
+  A project with harness files but no manifest — deleted, or harnessed by hand — is not guessed at: update refuses and
   points to setup, whose adoption shows each difference and asks.
 
 **Outside a harnessed project the plugin does nothing.** The plugin is installed per
@@ -385,9 +395,14 @@ in Claude Code's own permission syntax, into `.claude/settings.json` (§6): `den
 the guard denies, `ask` for what it asks about, and deny rules on reading secret files. If
 the guard is down, Claude Code still refuses or asks for everything on the floor, and any
 command not already allowed goes through the session's permission mode, which asks. The
-floor is coarser than the guard — prefix matching, no parsing of compound commands — so it
-is a floor, not a replacement. Setup reports any project `allow` entry broad enough to
-undercut it.
+floor is coarser than the guard, but not for the reason this plan first assumed: deny and ask
+rules **do** see every subcommand of a compound command, including inside a subshell or a
+command substitution, and they match past a leading assignment. What escapes them is a program
+named by an absolute path the floor does not list, a shell or environment runner that executes
+its argument, `find` with `-exec` or `-delete`, an exec wrapper — and, above all, anything that
+depends on the task, since a deletion inside the paths a task declares is ordinary work. Those
+gaps are recorded in `floor.json` as `guard_only`, each with its reason. Setup reports any
+project `allow` entry that covers a floor entry, and says that the floor still applies.
 
 What is promised, then: **the guard never allows on its own error; when the hook itself
 fails, protection falls to the floor and the permission mode, never to nothing** — unless
@@ -467,11 +482,18 @@ enforces itself. Each is its own OpenSpec change, in this order.
   - One snapshot plus a property beats several snapshots. "A set renders the same beside any other" holds for every combination, not for the two someone recorded, and it is the property `setup` actually relies on when it offers sets freely.
   - The redundancy in the format is the check: `id` repeats the file name and `set` repeats the directory, so a rule moved or copied without care is caught before the duplicate statement reaches a project.
 
-#### C1c · setup writes a project, new or existing
-- **Delivers:** `/harnex:setup` (pillar 2) and `plugin/scripts/setup.py`; the templates for `AGENTS.md`, `CLAUDE.md`, `.harnex.yml` and the OpenSpec config, and the two pointer lines; the questions it asks (profiles, sets, features, canary word, decision backend); the survey–plan–write sequence and adoption of §6, calling C1b's renderer for `.harnex/rules.md`; the permission floor (`plugin/control/floor.json`, pillar 4) and its entry-level merge into `.claude/settings.json`; the committed manifest at `.harnex/manifest.json` and the self-ignoring `.harnex/state/`. The whole update contract of §6 is fixed here — manifest format, conflict rules, atomic writes, recovery — even though the `update` command arrives in C6. Pillar 4's README is restated in the terms of §9: a floor and a guard, not "permissions per role" and not "never fails open".
-- **You try it:** in an empty scratch project, run `/harnex:setup`, read the plan it prints, say yes, read the files. Run it again: the plan says "nothing to do" and nothing changes. Then copy an existing project of yours that has its own `AGENTS.md`, `CLAUDE.md` and `.claude/settings.json`, and run setup there: it proposes the pointer lines and asks, merges the floor entries without touching yours, and your files are otherwise byte-identical. Clone the scratch project fresh and run setup: nothing to do.
-- **Tests:** snapshots with defaults for each profile combination; a second run byte-identical to the first; fixtures for an existing project — `AGENTS.md` and `CLAUDE.md` without pointer lines, a `settings.json` with its own entries and one contradicting the floor, a foreign `.harnex/rules.md`, an existing OpenSpec config — asserting what is kept, what is asked and what stops the run before any write; a run interrupted after each write, re-run to completion; a fresh clone recognised through the committed manifest; a manifest missing with harness files present, refused.
-- **Exit:** a new project and an existing one are both set up in one command each; a second setup changes nothing; no project-owned byte changes without an explicit yes.
+#### C1c · setup writes a project, new or existing — **delivered**, change `setup-writes-a-project`
+- **Delivers:** `/harnex:setup` — one skill, `plugin/skills/setup/`, and `plugin/scripts/setup.py` with three verbs (`choices`, `plan`, `write`); the templates for `AGENTS.md`, `CLAUDE.md`, `.harnex.yml` and the OpenSpec config under `plugin/context/templates/`, the two pointer lines being files of their own that state where the line goes, what proves it is there and what is lost without it; the questions setup asks, offering only what the harness holds; the survey–plan–write sequence and adoption of §6, calling C1b's renderer for `.harnex/rules.md`; the permission floor (`plugin/control/floor.json`, pillar 4), every entry naming the rule it comes from, and its entry-level merge into `.claude/settings.json`; the committed record at `.harnex/manifest.json` and the self-ignoring `.harnex/state/`. The whole update contract of §6 is fixed here — record format, conflict rules, atomic writes, recovery by content — even though the `update` command arrives in C6. Pillar 4's README is restated in the terms of §9, and the five rules the guard enforces now name both layers and say what each one gives.
+- **You try it:** in an empty scratch project, run `/harnex:setup`, read the plan it prints, say yes, read the files. Run it again: "nothing to do", and not a byte changes. Then take an existing project with its own `AGENTS.md`, `CLAUDE.md` and `.claude/settings.json`: it offers the pointer lines one at a time, merges the floor without touching your entries, and everything you declined is byte-identical afterwards. Clone the scratch project fresh: every committed path is unchanged and only the uncommitted state directory is restored. Full steps in [smoke.md](smoke.md).
+- **Tests:** the survey's classes, the plan, the writes and the floor — snapshots of a whole project for two set choices; a second run byte-identical to the first, the record included; fixtures for an existing project, a foreign rules file, an unreadable settings file, and a record missing, unreadable or of an unknown format; a run interrupted before the first write and after each one, re-run to completion, asserting the same tree and no fragment left behind; the floor's coverage rule by rule, its merge, and the overlap notice; the private-name check extended to the templates, the floor, what setup writes and the committed snapshots; one run of the script as a real process, the way the host starts it.
+- **Exit:** met. A new project and an existing one are both set up in one command each, a second setup changes nothing, and no project-owned byte changes without an explicit yes.
+- **What it taught us**, verified against Claude Code `2.1.269`:
+  - **A command in front of a skill is two components for one capability.** The host lists both in one inventory (`Skills (2)`), each paying its own always-on description, and a skill named `setup` is already invoked as `/harnex:setup`. The thin command bought the name it already had; dropping it left one component at ~81 always-on tokens.
+  - **The host's rule order turns one of this plan's conflicts into a notice.** Deny, then ask, then allow, first match wins, and no allow carves an exception: a project `allow` cannot undercut the floor. §6 and §9 disagreed about this; the host settled it, and refusing to write over it would have been protection theatre.
+  - **The floor sees more than assumed and less than hoped.** Deny and ask rules match every subcommand of a compound command; what escapes them is wrappers, absolute paths and anything that depends on the task. The residue is recorded in `floor.json` as `guard_only` rather than left implicit.
+  - **Recovery by content has to cover entries, not only files.** An interruption after the settings merge and before the record left the harness unable to say which entries were its own. The fix is the rule the files already followed: what is already exactly what would be written is current. The interruption test found it, one write at a time.
+  - **"Already harnessed" and "nothing to write" are not the same thing.** A fresh clone lacks the runtime state directory by design, so the honest promise is that nothing committed changes and nothing is asked — not "nothing to do".
+  - **A project's permission file cannot be merged as text.** Parsing it, adding entries and writing only when the parsed result differs is what makes a second run byte-identical whatever formatting the project uses. The price is that the first merge reformats the file, which the plan prints before the yes.
 
 #### C1d · the canary check
 - **Delivers:** a recorded Stop payload from Claude Code 2.1.267 confirming what the docs state — the hook input carries `last_assistant_message` — kept as a test fixture; `plugin/feedback/canary/canary.py` and the Stop hook (and SubagentStop) in `plugin/hooks/hooks.json`. The hook is inert unless `.harnex.yml` exists and chooses the `canary` set, and reads the word only from `.harnex.yml` — there is no fallback word in the hook. Its warning says the word is missing and that the rules may no longer be in effect, not that the context is lost. The `canary` rule's wording is revised to match (§3). Pillar 5, checking the rule C1b states.
@@ -563,11 +585,10 @@ surface. Never: an unattended mode.
 ## 13. Open questions
 
 - Whether `/codex:rescue` can be pointed at a specific branch or worktree, how its jobs are recovered after an interruption, and what its sandbox lets it do to `.git` (answered by the S1 spike, before C2).
-- Whether Claude Code's permission syntax can express every deny and ask pattern closely enough for the floor, and which patterns must stay guard-only (answered in C1c, checked entry by entry in C4).
 - Whether the decision backend for the guard should be allowed in `mock` mode at all, since it would ask on every ambiguous command (default: yes, with the allowlist doing most of the work).
 - Which additional MCP servers, if any, the profiles should declare.
 
-Answered since v2: the Stop hook receives the last assistant message directly, in `last_assistant_message` (Claude Code docs, 2.1.267); C1d records a real payload to confirm it.
+Answered since v2: the Stop hook receives the last assistant message directly, in `last_assistant_message` (Claude Code docs, 2.1.267); C1d records a real payload to confirm it. Whether the host's permission syntax can express every deny and ask pattern: yes, for every rule the harness states, with the residue recorded in `floor.json` as `guard_only` — [the decision note](decisions/2026-09-25-the-permission-floor-in-the-hosts-syntax.md), answered in C1c; C4 checks its regenerated floor against those entries one by one.
 
 ## 14. Risks
 
@@ -576,4 +597,4 @@ Answered since v2: the Stop hook receives the last assistant message directly, i
 - **Claude Code formats** (hooks payload, agent frontmatter, settings) change monthly; recorded fixtures per version and minimum frontmatter keep the blast radius to one field.
 - **Scope creep** toward a runtime; the non-goal is explicit and every phase must be usable on its own.
 - **Enforcement gaps on the Codex side**: in v0.1 the builder's limits there are instruction plus detection, and prevention is whatever Codex's sandbox provides. §4 says so; S1 measures it; a Codex-side hook closes part of it later.
-- **The floor is coarser than the guard** (prefix rules, no parsing of compound commands), so with the hook down some commands the guard would deny are only asked about. The floor is tested to cover every pattern; setup warns about broad project `allow` entries and about modes that bypass permissions.
+- **The floor is coarser than the guard** — not on compound commands, which its deny and ask rules do see, but on wrappers, absolute program paths and anything that depends on the task — so with the hook down some commands the guard would judge are only asked about, and a few are not seen at all. What it cannot express is recorded in `floor.json` as `guard_only`; the floor is tested rule by rule; setup reports project `allow` entries that cover it and warns about modes that bypass permissions.

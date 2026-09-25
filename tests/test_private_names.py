@@ -137,3 +137,47 @@ def test_a_seeded_home_path_is_detected(plugin_root: Path) -> None:
             test_the_plugin_publishes_no_private_shape(plugin_root)
     finally:
         seeded.unlink()
+
+
+def _written(tmp_path: Path, plugin_root: Path) -> list[Path]:
+    """A project as setup leaves it: the other thing that travels out of the harness.
+
+    The tree and the rendered rules are checked above; this is everything else setup puts
+    in someone's repository — the templates it renders and the floor it merges.
+    """
+    import json
+
+    import setup
+
+    project = tmp_path / "written"
+    project.mkdir()
+    from conftest import DEFAULT_ANSWERS
+
+    answers = setup.read_answers(json.dumps(DEFAULT_ANSWERS), plugin_root)
+    setup.apply_plan(setup.build_plan(project, plugin_root, answers))
+    return [p for p in sorted(project.rglob("*")) if p.is_file()]
+
+
+def test_what_setup_writes_publishes_no_private_shape(tmp_path: Path, plugin_root: Path) -> None:
+    hits = _scan(_written(tmp_path, plugin_root), SHAPE_PATTERNS)
+    assert not hits, "private-looking content in what setup writes:\n" + "\n".join(hits)
+
+
+def test_what_setup_writes_publishes_no_personal_term(tmp_path: Path, plugin_root: Path) -> None:
+    hits = _scan(_written(tmp_path, plugin_root), _personal_patterns())
+    assert not hits, "private names in what setup writes:\n" + "\n".join(hits)
+
+
+def _snapshots(repo_root: Path) -> list[Path]:
+    """The committed snapshots: a leak recorded here would be published with the tests."""
+    return [p for p in sorted((repo_root / "tests" / "snapshots").rglob("*")) if p.is_file()]
+
+
+def test_the_snapshots_publish_no_private_shape(repo_root: Path) -> None:
+    hits = _scan(_snapshots(repo_root), SHAPE_PATTERNS)
+    assert not hits, "private-looking content in a snapshot:\n" + "\n".join(hits)
+
+
+def test_the_snapshots_publish_no_personal_term(repo_root: Path) -> None:
+    hits = _scan(_snapshots(repo_root), _personal_patterns())
+    assert not hits, "private names in a snapshot:\n" + "\n".join(hits)

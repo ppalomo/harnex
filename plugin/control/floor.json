@@ -1,0 +1,80 @@
+{
+  "format": 1,
+  "verified_against": "Claude Code 2.1.269",
+  "note": "The floor states what the harness's own rules state, in the host's permission syntax, and nothing more: a rule that says ask becomes an ask entry, and deny is used only where reading could never be part of a project's work. Every entry names the rule it comes from, so a check can walk from a rule to its coverage and back. Order matters: a pattern beginning with ! carves paths out of the entries listed before it.",
+  "entries": [
+    {"rule": "credentials-never-leave-the-machine", "list": "deny", "pattern": "Read(~/.ssh/**)"},
+    {"rule": "credentials-never-leave-the-machine", "list": "deny", "pattern": "Read(~/.aws/**)"},
+    {"rule": "credentials-never-leave-the-machine", "list": "deny", "pattern": "Read(~/.config/gh/**)"},
+    {"rule": "credentials-never-leave-the-machine", "list": "deny", "pattern": "Read(**/id_rsa)"},
+    {"rule": "credentials-never-leave-the-machine", "list": "deny", "pattern": "Read(**/id_ed25519)"},
+    {"rule": "credentials-never-leave-the-machine", "list": "deny", "pattern": "Read(**/*.pem)"},
+
+    {"rule": "credentials-never-leave-the-machine", "list": "ask", "pattern": "Read(.env)"},
+    {"rule": "credentials-never-leave-the-machine", "list": "ask", "pattern": "Read(.env.*)"},
+    {"rule": "credentials-never-leave-the-machine", "list": "ask", "pattern": "Read(*.env)"},
+    {"rule": "credentials-never-leave-the-machine", "list": "ask", "pattern": "Read(!.env.example)"},
+    {"rule": "credentials-never-leave-the-machine", "list": "ask", "pattern": "Read(!.env.sample)"},
+    {"rule": "credentials-never-leave-the-machine", "list": "ask", "pattern": "Bash(cat .env*)"},
+    {"rule": "credentials-never-leave-the-machine", "list": "ask", "pattern": "Bash(printenv *)"},
+
+    {"rule": "pushes-ask", "list": "ask", "pattern": "Bash(git push *)"},
+    {"rule": "pushes-ask", "list": "ask", "pattern": "Bash(git * push *)"},
+    {"rule": "pushes-ask", "list": "ask", "pattern": "Bash(git remote add *)"},
+    {"rule": "pushes-ask", "list": "ask", "pattern": "Bash(git remote set-url *)"},
+    {"rule": "pushes-ask", "list": "ask", "pattern": "Bash(gh pr create *)"},
+    {"rule": "pushes-ask", "list": "ask", "pattern": "Bash(gh pr merge *)"},
+    {"rule": "pushes-ask", "list": "ask", "pattern": "Bash(gh release create *)"},
+    {"rule": "pushes-ask", "list": "ask", "pattern": "Bash(gh repo create *)"},
+
+    {"rule": "deletions-ask", "list": "ask", "pattern": "Bash(rm *)"},
+    {"rule": "deletions-ask", "list": "ask", "pattern": "Bash(/bin/rm *)"},
+    {"rule": "deletions-ask", "list": "ask", "pattern": "Bash(/usr/bin/rm *)"},
+    {"rule": "deletions-ask", "list": "ask", "pattern": "Bash(rmdir *)"},
+    {"rule": "deletions-ask", "list": "ask", "pattern": "Bash(git branch -d *)"},
+    {"rule": "deletions-ask", "list": "ask", "pattern": "Bash(git branch -D *)"},
+    {"rule": "deletions-ask", "list": "ask", "pattern": "Bash(git remote remove *)"},
+
+    {"rule": "destructive-commands-ask", "list": "ask", "pattern": "Bash(sudo *)"},
+    {"rule": "destructive-commands-ask", "list": "ask", "pattern": "Bash(dd *)"},
+    {"rule": "destructive-commands-ask", "list": "ask", "pattern": "Bash(mkfs *)"},
+    {"rule": "destructive-commands-ask", "list": "ask", "pattern": "Bash(bash -c *)"},
+    {"rule": "destructive-commands-ask", "list": "ask", "pattern": "Bash(sh -c *)"},
+    {"rule": "destructive-commands-ask", "list": "ask", "pattern": "Bash(git reset --hard *)"},
+    {"rule": "destructive-commands-ask", "list": "ask", "pattern": "Bash(git clean *)"},
+    {"rule": "destructive-commands-ask", "list": "ask", "pattern": "Bash(git rebase *)"},
+    {"rule": "destructive-commands-ask", "list": "ask", "pattern": "Bash(git filter-branch *)"},
+    {"rule": "destructive-commands-ask", "list": "ask", "pattern": "Bash(git filter-repo *)"},
+    {"rule": "destructive-commands-ask", "list": "ask", "pattern": "Bash(git checkout -- *)"},
+    {"rule": "destructive-commands-ask", "list": "ask", "pattern": "Bash(git restore *)"},
+
+    {"rule": "commits-only-when-shipping", "list": "ask", "pattern": "Bash(git commit *)"},
+    {"rule": "commits-only-when-shipping", "list": "ask", "pattern": "Bash(git * commit *)"}
+  ],
+  "guard_only": [
+    {
+      "rule": "destructive-commands-ask",
+      "why": "A program named by an absolute path is matched as the string it is written as, so a spelling the floor does not list escapes every prefix entry. Only the common spellings of the commonest deletion are listed; the rest needs a component that resolves the program."
+    },
+    {
+      "rule": "destructive-commands-ask",
+      "why": "An environment runner executes whatever follows it, and the host does not strip it before matching, so the inner command is never seen by a floor entry written for it."
+    },
+    {
+      "rule": "destructive-commands-ask",
+      "why": "An exec wrapper that runs its argument cannot be auto-approved or matched by a prefix rule, so what it wraps is invisible to the floor."
+    },
+    {
+      "rule": "destructive-commands-ask",
+      "why": "Whether a command is destructive often depends on the task: a deletion inside the paths a task declares is ordinary work. The floor asks in both cases; telling them apart needs a component that knows the task."
+    },
+    {
+      "rule": "deletions-ask",
+      "why": "A search command that deletes or executes through its own options hides the deletion in an argument, which a prefix entry for the search command does not cover."
+    },
+    {
+      "rule": "credentials-never-leave-the-machine",
+      "why": "Printing, committing or sending a value the process already holds is invisible to a pattern: no rule can see what a variable contains, so only a component that reads the command's intent can refuse it."
+    }
+  ]
+}
