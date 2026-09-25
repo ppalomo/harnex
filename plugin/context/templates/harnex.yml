@@ -1,0 +1,7 @@
+# The project's answers to the harness's questions.
+#
+# This file belongs to the project: the harness reads it and never rewrites it. Change a
+# value here and run setup again to re-render what the harness owns. The shape is flat on
+# purpose — scalars, and three lists — so that every hook and command can read it without
+# resolving a dependency first.
+{{keys}}

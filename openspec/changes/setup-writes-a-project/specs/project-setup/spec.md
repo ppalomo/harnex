@@ -177,8 +177,9 @@ including the record of what was generated.
 #### Scenario: A fresh clone of a harnessed project
 
 - **WHEN** a project that was set up is cloned fresh and the command is run in the clone
-- **THEN** it recognises the project as already harnessed from the committed record and
-  plans nothing to do
+- **THEN** it recognises the project as already harnessed from the committed record, asks
+  nothing, and plans to restore only the runtime state location, which is deliberately not
+  committed; every committed path is reported unchanged
 
 ### Requirement: Runtime state stays out of the project's history without touching the project's rules
 

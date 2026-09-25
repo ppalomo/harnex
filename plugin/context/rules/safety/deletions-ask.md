@@ -12,5 +12,7 @@ unbounded and whose benefit is usually tidiness. Inside the paths a task declare
 deletion is part of the work; outside them it is a surprise, and a surprise the person
 may only notice much later.
 
-**Enforced by:** the shell guard of pillar 4, which asks before any command that removes
-something.
+**Enforced by:** the permission floor of pillar 4, which asks before the common
+spellings of a removal even when nothing of the harness is running; and the shell guard
+of the same pillar, which is what can tell a deletion inside the task's declared paths
+from one outside them.

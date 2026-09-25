@@ -116,14 +116,52 @@ if absent; if the result equals what was parsed, write nothing at all. That is w
 second run byte-identical whatever the project's formatting, and it costs one comparison.
 A file that cannot be parsed as JSON is a conflict named as such, not a file to rewrite.
 
-An `allow` entry undercuts the floor when its tool matches and its pattern covers a floor
-entry's — equal, or a prefix generalisation of it (`Bash(git:*)` covers `Bash(git push:*)`;
-`Bash` and `Bash(*)` cover everything). Only that shape is compared; anything else broad
-enough to matter is reported as broad rather than judged. The comparison is deliberately
-coarse and the report says so, because a wrong "no conflict" is worse than a conflict the
-person looks at.
+### What the host's documentation settled, and what it changed here
+
+The plan says two different things about a project `allow` entry that covers what the floor
+asks about: §6 calls it a conflict that stops the run, §9 says setup warns about it. The
+host's own documentation settles it (`code.claude.com/docs/en/permissions`, read against
+Claude Code 2.1.269):
+
+- **Rules resolve deny → ask → allow, first match wins, and specificity does not change the
+  order.** "An allow rule can't carve an exception out of a deny rule. The same precedence
+  applies between ask and allow: a matching ask rule prompts even when a more specific allow
+  rule also matches the same call." So a project `allow` **cannot** undercut a floor entry.
+  The overlap is worth reporting — the person should know their rule is inert for those
+  commands — but stopping the run over it would refuse to write a floor that would have
+  worked. §6's "conflict" is therefore implemented as §9's "warns", and both sentences of the
+  plan are corrected to say the same thing.
+- **Deny and ask rules already see compound commands.** They "apply when any subcommand
+  matches them, including a command nested inside a subshell, a command substitution, or a
+  control-flow body", and they match past a leading environment assignment. The plan's claim
+  that the floor does no parsing of compound commands is true only of `allow` rules; corrected
+  in §9.
+- **What genuinely escapes a prefix rule** is a program named by an absolute path
+  (`/bin/rm`), a shell wrapper (`bash -c '…'`), an environment runner (`devbox run`,
+  `docker exec`), `find -exec` and `-delete`, exec wrappers such as `watch` and `setsid`, and
+  git's own `-C` and `-c` forms — the documentation's example is that `Bash(git push *)` does
+  not match `git -C . push origin main`. Where a second pattern closes the gap cheaply the
+  floor carries it (`Bash(git * push *)` beside `Bash(git push *)`, the absolute-path spellings
+  of `rm`, and an ask on `bash -c`); the rest is what `guard_only` records, and it is the
+  answer to the plan's open question.
+- **A bare tool name in `deny` removes the tool from the model's context entirely.** The floor
+  therefore never writes one: every entry is scoped.
+- **One mode does defeat the floor**: a permission mode that bypasses permissions. Setup warns
+  and writes the floor anyway. Sandboxing does not defeat it, because content-scoped ask rules
+  still prompt there.
+
+So the overlap check stays, and what it produces is a notice, not a stop. It compares tool and
+pattern: an entry equal to a floor entry's, or a prefix generalisation of it (`Bash(git *)`
+meets `Bash(git push *)`; a bare `Bash` or `Bash(*)` meets everything). Anything else broad
+enough to matter is reported as broad rather than judged, because a wrong "nothing to see" is
+worse than a notice the person reads.
 
 ### Survey classifies by content, so nothing needs remembering
+
+A fresh clone is the one case where "already harnessed" and "nothing to write" come
+apart: the runtime state location is deliberately not committed, so a clone is recognised
+from the record, asks nothing, and restores that one path. Everything committed is
+reported unchanged.
 
 Four classes, from the record and the bytes on disk: absent; **generated** (hash matches the
 record); **current** (no record, or a stale one, but byte-identical to what would be
@@ -153,6 +191,7 @@ Per the repository's rule that every guarantee names its kind and its failure mo
 | The floor covers every rule enforced by the guard | **detection** in the checks, rule by rule | A rule with neither an entry nor a recorded reason fails the check |
 | A command the harness would refuse is still refused with nothing of ours running | **prevention** by the host, from the floor's entries | The floor is coarser than the guard, so some commands are asked about rather than refused; a host mode that bypasses permissions leaves nothing in force, which setup warns about and no harness can defend against |
 | The project's own permission entries are preserved | **prevention**: the merge is by entry on parsed data | An unparsable file is a conflict and the run stops; formatting is not preserved the first time the floor lands, and the plan says so |
+| A project entry that meets the floor is seen by the person | **detection**, reported in the plan | The host's rule order means the floor applies regardless, so a missed notice costs information, not protection |
 
 ## Risks / Trade-offs
 
@@ -160,7 +199,7 @@ Per the repository's rule that every guarantee names its kind and its failure mo
   yes, the content is preserved entry for entry, and every later run writes nothing.
 - **The host's permission syntax may not express a pattern closely enough** → `guard_only`
   records it with its reason, the checks accept it, and `C4` inherits a list of exactly what
-  only the guard can cover.
+  only the guard can cover. The gaps are known and named above rather than assumed away.
 - **The host's permission and settings formats change monthly** → every pattern lives in one
   file, with the verified version recorded; a format change is one file to edit.
 - **A project may write real YAML in `.harnex.yml`** → the reader refuses with the line

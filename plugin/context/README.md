@@ -32,7 +32,12 @@ expected to remember between tasks.
   sets, and the project's profiles, into the rules file a project reads. The rendering is
   a pure function of those choices, which is what lets `update` own the file by hash.
 
+- `templates/` — what `setup` writes into a project that does not have it yet: the brief
+  the project fills in, the entry file each tool opens first, the project's recorded
+  answers and the spec workflow's config. Two of them are pointer lines and nothing else:
+  a file states the line, where it goes, what proves it is already there, and what is lost
+  without it.
+
 ## Still to come
 
-`C1c` adds the instruction templates that `setup` renders into a project. The progress
-conventions arrive with the workflow in `C2`.
+The progress conventions arrive with the workflow in `C2`.

@@ -64,17 +64,20 @@ NOT be duplicated, and the entries written SHALL be recorded as the harness's ow
 - **WHEN** the merge runs again on a project that already carries the floor
 - **THEN** no entry is duplicated and the file is left byte-identical
 
-### Requirement: A project permission that undercuts the floor is a conflict
+### Requirement: A project permission that overlaps the floor is reported, not resolved
 
-A project entry that would allow what the floor refuses or asks about SHALL be reported as a
-conflict and SHALL NOT be removed, narrowed or overridden by the harness. The run SHALL stop
-before writing anything.
+The harness SHALL report every project permission entry that overlaps a floor entry, saying
+which floor entry it meets and what the host's rule order makes of it, and SHALL NOT remove,
+narrow or override it. An overlap SHALL NOT stop the run: the host resolves its rules in a
+fixed order the harness cannot change, so an entry that allows what the floor refuses or asks
+about does not defeat the floor — it is a statement of intent the person should see.
 
 #### Scenario: A project allowing what the floor asks about
 
 - **WHEN** the survey finds a project entry allowing a command the floor asks about
-- **THEN** the run stops before any write, names the entry and the floor entry it undercuts,
-  and leaves the resolution to the person
+- **THEN** it is reported, naming the floor entry it meets and saying that the floor still
+  applies because the host resolves refusals and questions before permissions, and the run
+  continues
 
 #### Scenario: A broad project entry
 
@@ -82,6 +85,12 @@ before writing anything.
   them
 - **THEN** it is reported with what it covers, so the person can narrow it or accept it
   knowingly
+
+#### Scenario: A project setting that disables the floor altogether
+
+- **WHEN** the project's settings choose a permission mode that bypasses permissions
+- **THEN** the harness reports that the floor has no effect in that mode, writes the floor
+  anyway, and does not claim protection it cannot give
 
 ### Requirement: The floor says what it guarantees and what defeats it
 

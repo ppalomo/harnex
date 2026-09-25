@@ -1,0 +1,15 @@
+schema: spec-driven
+
+# Shown to an agent when it creates a change's artifacts.
+context: |
+  Read AGENTS.md for what this project is, how work is done here and what is off limits,
+  and .harnex/rules.md for the rules every agent follows. Neither is restated here.
+
+rules:
+  proposal:
+    - Include a "Non-goals" section
+  design:
+    - For every guarantee the change makes, say whether it is instruction, prevention or
+      detection, and what happens when the component providing it fails
+  tasks:
+    - Each task states how its completion is verified
