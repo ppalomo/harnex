@@ -38,6 +38,16 @@ deltas into `openspec/specs/` and update `docs/PLAN.md` to match.
 No AI author or co-author lines in commits or pull requests, ever. Commit messages are
 conventional and in English.
 
+The rule is stated here for people and agents to read, and enforced by `.githooks/commit-msg`,
+which strips such a line from the message *before* the commit is made — so it holds for
+`-m`, for the editor, for an amend and for any tool that commits on your behalf. It removes
+attribution to a tool only, leaves a human co-author alone, and says whatever it removed.
+Enable it once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
 ## Tests
 
 Run the repository's own checks with `uv run --with pytest pytest`. They check the

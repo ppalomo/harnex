@@ -1,0 +1,34 @@
+#!/bin/sh
+# Strip AI attribution from a commit message before the commit is made.
+#
+# AGENTS.md: no AI author or co-author lines in commits or pull requests, ever. That rule
+# is stated for people and agents to read; this is what makes it hold when a tool adds the
+# line anyway. It runs on the message file, so it catches `-m`, `-F`, the editor, an amend
+# and any tool that commits on your behalf — which is the difference between preventing
+# the line and correcting it afterwards.
+#
+# It removes attribution to a tool only. A human co-author is left alone. Whatever it
+# removes, it says so, so a silent rewrite of your message never happens.
+#
+# Enable it once per clone:  git config core.hooksPath .githooks
+
+message="$1"
+work="$message.harnex"
+
+grep -viE '^[[:space:]]*co-authored-by:.*(claude|codex|copilot|chatgpt|gpt-[0-9]|gemini|anthropic|openai)' "$message" \
+  | grep -viE '^[[:space:]]*(🤖[[:space:]]*)?generated with \[?(claude code|codex|copilot)' \
+  | grep -viE '^[[:space:]]*(assisted-by|ai-assisted-by|authored-with):.*(claude|codex|copilot)' \
+  > "$work"
+
+# Drop the blank lines the removal may have left at the end, and nothing else.
+awk '{ line[NR] = $0; if (NF) last = NR } END { for (i = 1; i <= last; i++) print line[i] }' \
+  "$work" > "$work.trimmed"
+
+if cmp -s "$message" "$work.trimmed"; then
+  rm -f "$work" "$work.trimmed"
+  exit 0
+fi
+
+mv "$work.trimmed" "$message"
+rm -f "$work"
+echo "harnex: removed an AI attribution line from the commit message (AGENTS.md forbids it)." >&2
