@@ -181,7 +181,7 @@ harnex/
     control/                            4 · floor.json (the permission floor), guard/ (patterns.yaml, guard.py), approvals.md
     feedback/                           5 · check-command.md, canary/canary.py, journal/format.md
     scripts/                            decide.py (backend interface), setup.py, update.py — Python, run with uv
-  docs/                               PLAN.md, diagrams/, reviews, decisions/ (ADRs), smoke.md
+  docs/                               PLAN.md, diagrams/, reviews, decisions/ (ADRs), smoke.md, observability.md (the owner's bench, not a component)
   openspec/                           harnex's own specs and changes
   tests/  pytest.ini                  harnex's own checks: the layout, the private names, the manifests
 ```
@@ -587,6 +587,7 @@ surface. Never: an unattended mode.
 - Whether `/codex:rescue` can be pointed at a specific branch or worktree, how its jobs are recovered after an interruption, and what its sandbox lets it do to `.git` (answered by the S1 spike, before C2).
 - Whether the decision backend for the guard should be allowed in `mock` mode at all, since it would ask on every ambiguous command (default: yes, with the allowlist doing most of the work).
 - Which additional MCP servers, if any, the profiles should declare.
+- Whether Codex, started through its plugin, honours the `TRACEPARENT` Claude Code passes to Bash, so its spans join the session's trace (S1); and C2's `decide.py` forwarding the session id to OpenRouter as `session_id`. Both serve the owner's [observability bench](observability.md), which is local configuration on the owner's machine and never ships in the plugin.
 
 Answered since v2: the Stop hook receives the last assistant message directly, in `last_assistant_message` (Claude Code docs, 2.1.267); C1d records a real payload to confirm it. Whether the host's permission syntax can express every deny and ask pattern: yes, for every rule the harness states, with the residue recorded in `floor.json` as `guard_only` — [the decision note](decisions/2026-09-25-the-permission-floor-in-the-hosts-syntax.md), answered in C1c; C4 checks its regenerated floor against those entries one by one.
 
