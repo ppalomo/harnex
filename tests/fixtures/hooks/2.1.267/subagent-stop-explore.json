@@ -1,0 +1,15 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000003",
+  "transcript_path": "/transcripts/session.jsonl",
+  "cwd": "/project",
+  "prompt_id": "00000000-0000-4000-8000-000000000004",
+  "permission_mode": "bypassPermissions",
+  "agent_id": "0000000000000000a2",
+  "agent_type": "Explore",
+  "hook_event_name": "SubagentStop",
+  "stop_hook_active": false,
+  "agent_transcript_path": "/transcripts/session/subagents/agent-0000000000000000a2.jsonl",
+  "last_assistant_message": "The directory contains a configuration file (CLAUDE.md), a Python hook script (dump_hook.py), a .claude configuration folder, and two recorded JSON files from recent subagent stops.",
+  "background_tasks": [],
+  "session_crons": []
+}

@@ -18,10 +18,12 @@ Sets in this file: canary, code, git, language, safety, sdd.
 The canary is a cheap, continuous test that the instructions are still in the context. A
 model that has lost them keeps answering fluently and stops following them, and there is
 no other signal that distinguishes that from a model that simply disagreed. A missing
-canary word means the instructions are gone: compact, or start again.
+canary word is a signal that this one instruction was not followed in that answer — not a
+diagnosis that the rules are gone, but the cheapest sign that they may no longer be in
+effect. Compacting or starting a new session is the usual remedy.
 
-**Enforced by:** the canary check of pillar 5, which reads the last answer at the end of
-each turn and warns when the word is absent.
+**Enforced by:** the canary check, `feedback/canary/canary.py` (pillar 5), run by the
+plugin's Stop hook on the main session's answers only.
 
 ## code
 

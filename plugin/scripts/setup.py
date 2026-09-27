@@ -78,6 +78,23 @@ BYPASS_MODES = ("bypassPermissions",)
 DEFAULT_CANARY = "Hullaballoo!"
 
 
+def canary_block(answers: "Answers") -> str:
+    """The paragraph `AGENTS.md` states the word in, or nothing if the set is not chosen.
+
+    `.harnex/rules.md` states the rule but never the word: it is a pure function of the
+    chosen sets, so a project fact does not belong in it. The word is the project's own,
+    so it belongs in `AGENTS.md` instead — the one place an agent actually reads it from.
+    """
+    if "canary" not in answers.sets:
+        return ""
+    return (
+        "## Canary\n\n"
+        f"End every answer with the word `{answers.canary}`. The harness's `Stop` hook\n"
+        "reads it and warns — never blocks — when it is missing, which is the cheapest\n"
+        "sign these instructions have dropped out of context.\n\n"
+    )
+
+
 class SetupError(Exception):
     """Something the harness will not guess at: it stops and says what it found."""
 
@@ -537,6 +554,7 @@ def _plan_project_files(
         AGENTS: lambda: {
             "project_name": answers.project_name,
             "check_command": answers.check_command,
+            "canary": canary_block(answers),
             "pointer_agents": pointers[AGENTS][0].text.rstrip("\n"),
         },
         CLAUDE: lambda: {

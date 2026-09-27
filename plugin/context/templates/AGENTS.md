@@ -19,4 +19,4 @@ this from this file asks you rather than assuming.
 
 The paths, the data and the actions that are never touched without asking you first.
 
-{{pointer_agents}}
+{{canary}}{{pointer_agents}}

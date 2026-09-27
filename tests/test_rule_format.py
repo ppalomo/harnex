@@ -10,6 +10,8 @@ a rule file is prose someone will be editing, and a check that mutates it in pla
 lose a draft.
 """
 
+import json
+import re
 from pathlib import Path
 
 import pytest
@@ -23,6 +25,10 @@ ENFORCER_LINE = "**Enforced by:**"
 REPO_ROOT = Path(__file__).resolve().parent.parent
 RULES_DIR = REPO_ROOT / "plugin" / "context" / "rules"
 RULE_FILES = sorted(RULES_DIR.glob("*/*.md"))
+HOOKS_JSON = REPO_ROOT / "plugin" / "hooks" / "hooks.json"
+
+_ENFORCER_SCRIPT_PATH = re.compile(r"`([\w./-]+\.py)`")
+_COMMAND_SCRIPT_PATH = re.compile(r"([\w./-]+\.py)")
 
 GOOD_RULE = """\
 ---
@@ -156,3 +162,118 @@ def test_a_good_rule_passes(tmp_path: Path) -> None:
     directory = _seed(tmp_path, GOOD_RULE)
     rule = _rule(directory / "a-rule.md")
     assert rule.statement == "Do the thing that this rule is about"
+
+
+# --- the hook walk: rule to hook, and hook to rule (C1d) ------------------------------
+
+GOOD_HOOK_RULE = """\
+---
+id: a-rule
+set: a-set
+applies_to: always
+enforced_by: hook
+---
+
+# Do the thing that this rule is about
+
+Because otherwise the other thing happens.
+
+**Enforced by:** the thing, `feedback/canary/canary.py`, run by a hook.
+"""
+
+
+def _hooked_scripts(hooks_path: Path) -> set[str]:
+    """Every script path (relative to the plugin root) a declared hook runs."""
+    declared = json.loads(hooks_path.read_text(encoding="utf-8"))
+    scripts: set[str] = set()
+    for entries in declared.get("hooks", {}).values():
+        for entry in entries:
+            for hook in entry.get("hooks", []):
+                if hook.get("type") != "command":
+                    continue
+                bare_command = hook["command"].replace("${CLAUDE_PLUGIN_ROOT}/", "")
+                match = _COMMAND_SCRIPT_PATH.search(bare_command)
+                if match:
+                    scripts.add(match.group(1))
+    return scripts
+
+
+def _enforcer_script(rule: render_rules.Rule) -> str | None:
+    """The script path an `enforced_by: hook` rule names in its body, if any."""
+    match = _ENFORCER_SCRIPT_PATH.search(rule.reason)
+    return match.group(1) if match else None
+
+
+def _check_hook_walk(rule_files: list[Path], hooks_path: Path) -> None:
+    """Both directions of the walk: rule to hook, and hook to rule."""
+    hooked = _hooked_scripts(hooks_path)
+    named: set[str] = set()
+    for path in rule_files:
+        rule = _rule(path)
+        if rule.enforced_by != "hook":
+            continue
+        script = _enforcer_script(rule)
+        assert script, f"{path}: declares enforced_by hook but names no script by path"
+        assert script in hooked, (
+            f"{path}: names `{script}` as its enforcer, but no hook in {hooks_path} "
+            f"runs it. Hooked scripts: {sorted(hooked) or 'none'}."
+        )
+        named.add(script)
+    unclaimed = sorted(hooked - named)
+    assert not unclaimed, (
+        f"{hooks_path} declares a hook running {unclaimed}, which no rule names as its "
+        "enforcer. A check with no rule behind it enforces something no agent was told."
+    )
+
+
+def test_the_hook_walk_holds_for_the_real_tree() -> None:
+    _check_hook_walk(RULE_FILES, HOOKS_JSON)
+
+
+def test_the_walk_catches_a_changed_enforcer_path(tmp_path: Path) -> None:
+    """The check fails when a rule's enforcer path no longer names a real hook."""
+    directory = _seed(
+        tmp_path,
+        GOOD_HOOK_RULE.replace("feedback/canary/canary.py", "feedback/canary/wrong.py"),
+        name="a-rule.md",
+    )
+    with pytest.raises(AssertionError, match="wrong.py"):
+        _check_hook_walk([directory / "a-rule.md"], HOOKS_JSON)
+
+
+def test_the_walk_catches_an_unclaimed_hook(tmp_path: Path) -> None:
+    """The check fails when a declared hook's script names no rule as its enforcer."""
+    hooks_path = tmp_path / "hooks.json"
+    hooks_path.write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "Stop": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": 'uv run --quiet "${CLAUDE_PLUGIN_ROOT}/feedback/canary/canary.py"',
+                                    "timeout": 5,
+                                }
+                            ]
+                        }
+                    ],
+                    "PreToolUse": [
+                        {
+                            "hooks": [
+                                {
+                                    "type": "command",
+                                    "command": 'uv run --quiet "${CLAUDE_PLUGIN_ROOT}/feedback/other/unclaimed.py"',
+                                    "timeout": 5,
+                                }
+                            ]
+                        }
+                    ],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(AssertionError, match="unclaimed.py"):
+        _check_hook_walk(RULE_FILES, hooks_path)

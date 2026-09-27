@@ -101,13 +101,17 @@ harnex cannot switch, so there the line is a **recommendation** and says so
 backend is `mock`, the line says so and asks you.
 
 **Canary.** When a project enables the `canary` set, every answer must end with the word
-declared in `.harnex.yml` (setup proposes `Hullaballoo!`). A Stop hook reads the last
-answer and warns when the word is missing. The warning is a **signal, not a diagnosis**:
-a missing word proves that this one instruction was not followed in that answer, which
-is the cheapest observable sign that the rules may have dropped out of the context or
-been diluted — compacting or restarting is the usual remedy. Its presence proves nothing
-about the other rules. It is the first rule that is both stated (pillar 1) and checked
-(pillar 5).
+declared in `.harnex.yml` (setup proposes `Hullaballoo!`) — stated for the model in
+`AGENTS.md`, since the rendered `.harnex/rules.md` is a pure function of the chosen sets
+and can only ever say "the word the project declares". A `Stop` hook reads the **main
+session's** last answer and warns when the word is missing; it does not run on a
+subagent's answer (`docs/decisions/`: a built-in subagent is not briefed on the project's
+instructions, so a missing word there proves nothing). The warning is a **signal, not a
+diagnosis**: a missing word proves that this one instruction was not followed in that
+answer, which is the cheapest observable sign that the rules may have dropped out of the
+context or been diluted — compacting or restarting is the usual remedy. Its presence
+proves nothing about the other rules. It is the first rule that is both stated (pillar 1)
+and checked (pillar 5).
 
 ## 4. Roles
 
@@ -173,7 +177,7 @@ harnex/
     commands/                           explore, propose, apply, verify, ship (pillar 2) — but see below
     skills/                             setup, update (pillar 2) — setup landed in C1c as a skill, no command
     agents/                             builder.md, verifier.md (Claude adapters of the roles, pillar 3)
-    hooks/hooks.json                    guard (PreToolUse Bash), canary (Stop, SubagentStop) — inert without .harnex.yml
+    hooks/hooks.json                    guard (PreToolUse Bash), canary (Stop, main session only) — inert without .harnex.yml
     context/                            1 · rules/ (one file per rule, grouped in sets), templates/ (AGENTS.md,
                                             CLAUDE.md, .harnex.yml, the pointer lines), memory.md
     tools/                              2 · mcp/ declarations, profiles/ (python-fastapi, react-vite)
@@ -495,11 +499,15 @@ enforces itself. Each is its own OpenSpec change, in this order.
   - **"Already harnessed" and "nothing to write" are not the same thing.** A fresh clone lacks the runtime state directory by design, so the honest promise is that nothing committed changes and nothing is asked — not "nothing to do".
   - **A project's permission file cannot be merged as text.** Parsing it, adding entries and writing only when the parsed result differs is what makes a second run byte-identical whatever formatting the project uses. The price is that the first merge reformats the file, which the plan prints before the yes.
 
-#### C1d · the canary check
-- **Delivers:** a recorded Stop payload from Claude Code 2.1.267 confirming what the docs state — the hook input carries `last_assistant_message` — kept as a test fixture; `plugin/feedback/canary/canary.py` and the Stop hook (and SubagentStop) in `plugin/hooks/hooks.json`. The hook is inert unless `.harnex.yml` exists and chooses the `canary` set, and reads the word only from `.harnex.yml` — there is no fallback word in the hook. Its warning says the word is missing and that the rules may no longer be in effect, not that the context is lost. The `canary` rule's wording is revised to match (§3). Pillar 5, checking the rule C1b states.
-- **You try it:** in the scratch project, ask Claude anything: the answer ends with your word. Delete the canary section from `.harnex/rules.md` and ask again: the hook warns. Remove `canary` from the sets and ask again: silence. Open a project that never ran setup: silence.
-- **Tests:** pytest over recorded payloads — word present, word missing, `.harnex.yml` absent, set not chosen, message field absent — each returning within its timeout and never blocking; the hook started as a real process with its declared command, not imported; a check that every rule with `enforced_by: hook` resolves to a hook that exists, which fails on C1b alone and passes here.
-- **Exit:** the canary is stated once and checked once; it acts only where it was chosen; removing the statement is detected.
+#### C1d · the canary check — **delivered**, change `canary-enforces-itself`
+- **Delivers:** three recorded Stop/SubagentStop payloads from a real Claude Code 2.1.267 session, sanitised, kept as test fixtures; `plugin/feedback/canary/canary.py` and a `Stop` hook — main session only — in `plugin/hooks/hooks.json`. The hook is inert unless `.harnex.yml` exists and chooses the `canary` set, and reads the word only from `.harnex.yml` — there is no fallback word in the hook. Its warning says the word is missing and that the rules may no longer be in effect, not that the context is lost. The `canary` rule's wording is revised to match (§3), and its enforcer line names the check by path. A new check walks from every hook the plugin declares back to the rule that claims it, the other half of C1b's rule-to-enforcer walk. `setup.py` renders a `## Canary` section into `AGENTS.md`, stating the word, when the set is chosen — found necessary only by trying the check by hand (see below). Pillars 5 and 1, plus pillar 2 for that one addition.
+- **You try it:** in the scratch project, ask Claude anything: the answer ends with your word, read from `AGENTS.md`. Ask it to answer without the word on purpose: the hook warns, visible in an interactive session or the desktop app (not in `claude -p`'s plain output — confirm with `--debug-file` instead). Remove `canary` from the sets and ask again: silence. Open a project that never ran setup: silence. Full steps in [smoke.md](smoke.md).
+- **Tests:** pytest over the recorded fixtures and cases derived from them in code — word present, in bold/italics/code, missing, mid-answer, in another case, a project word other than the one proposed, `.harnex.yml` absent, set not chosen, set chosen without a word, unreadable, field absent, field empty, malformed stdin — each asserting exit 0 and no block decision; the hook started as a real process with the command `hooks.json` declares, timed against its own budget; the two-way walk between rules and hooks, seeded with both faults it must catch.
+- **Exit:** met. The canary is stated once and checked once; it acts only where it was chosen; removing the statement is detected.
+- **What it taught us**, verified against Claude Code `2.1.267`:
+  - **A rule and a working check are not the same thing as a check the model can pass.** `.harnex/rules.md` is a pure function of the chosen sets, so the rule can only say "the word the project declares" — never the word itself. Nothing else rendered into a fresh project ever stated it: it lived in `.harnex.yml` only, which nothing points a model at. Asked to quote and follow its own rule, the model correctly reported it had no way to know the word. The fix (a `## Canary` line in `AGENTS.md`, from the answer setup already held) touches pillar 2, which the change's own proposal had first declared unchanged — caught only by running the manual steps for real rather than trusting the design.
+  - **A subagent's silence is not the same signal as the main session's.** A `general-purpose` subagent, briefed on the project's instructions, ended with the word; a built-in `Explore` subagent, never briefed on them, did not — recorded from the same session, so the only variable was which agent type answered. Hooking `SubagentStop` today would warn on every `Explore` call regardless of anything going wrong, training the person to ignore the signal. Decided and recorded in `docs/decisions/`; reopens with `C2`'s own subagents, whose prompts harnex writes.
+  - **A hook's warning does not reach every surface the same way.** The `Stop` hook's `systemMessage` shows in an interactive session's transcript and in the desktop app, but `claude -p`'s plain-text output never prints it — only `--debug-file` does. A manual check written against headless output alone would have called a working hook silent.
 
 ### S1 · spike: delegating to Codex — before C2
 - **Answers**, recorded in `docs/decisions/`: whether `/codex:rescue` takes a task reliably, on which branch or worktree it works and whether it can be pointed at one; how its job status and result are read back, and what survives an interruption (the recovery contract of §10 depends on it); what its sandbox lets it do to `.git` — commit, move refs — and to paths outside the workspace; what evidence comes back. Timeboxed to a day, run in parallel with C1c or C1d, against a scratch repository.
@@ -548,7 +556,7 @@ surface. Never: an unattended mode.
 4. Three roles: architect, builder, verifier. The orchestrator is the human. Commits only in `ship`.
 5. The decision model sits behind one interface; `jev` and `mock` backends in v0.1; each question carries its own rule on probabilities; `mock` behaviour is defined for every question.
 6. The guard is deterministic first and never allows on its own error; deny never comes from the model alone. Because a hook that crashes or times out cannot answer, a permission floor in `.claude/settings.json` carries the same deny and ask patterns (§9).
-7. The canary is a rule plus a Stop hook, active only in a project that chose the `canary` set; setup proposes `Hullaballoo!`, and the word lives in `.harnex.yml`. Its warning is a signal of non-compliance, not a diagnosis of lost context.
+7. The canary is a rule plus a `Stop` hook on the **main session's answers only**, active only in a project that chose the `canary` set; setup proposes `Hullaballoo!`, the word lives in `.harnex.yml`, and setup also states it in `AGENTS.md` since a rendered rules file cannot. Its warning is a signal of non-compliance, not a diagnosis of lost context.
 8. Everything committed is English, command names included: `explore`, `propose`, `apply`, `verify`, `ship`.
 9. Python with `uv` for scripts; minimum frontmatter for agents and skills.
 10. No AI author or co-author lines in commits or PRs, in harnex and in every harnessed project (`git` rule set).
@@ -589,7 +597,7 @@ surface. Never: an unattended mode.
 - Which additional MCP servers, if any, the profiles should declare.
 - Whether Codex, started through its plugin, honours the `TRACEPARENT` Claude Code passes to Bash, so its spans join the session's trace (S1); and C2's `decide.py` forwarding the session id to OpenRouter as `session_id`. Both serve the owner's [observability bench](observability.md), which is local configuration on the owner's machine and never ships in the plugin.
 
-Answered since v2: the Stop hook receives the last assistant message directly, in `last_assistant_message` (Claude Code docs, 2.1.267); C1d records a real payload to confirm it. Whether the host's permission syntax can express every deny and ask pattern: yes, for every rule the harness states, with the residue recorded in `floor.json` as `guard_only` — [the decision note](decisions/2026-09-25-the-permission-floor-in-the-hosts-syntax.md), answered in C1c; C4 checks its regenerated floor against those entries one by one.
+Answered since v2: the Stop hook receives the last assistant message directly, in `last_assistant_message` (Claude Code docs, 2.1.267); C1d records a real payload to confirm it. Whether the host's permission syntax can express every deny and ask pattern: yes, for every rule the harness states, with the residue recorded in `floor.json` as `guard_only` — [the decision note](decisions/2026-09-25-the-permission-floor-in-the-hosts-syntax.md), answered in C1c; C4 checks its regenerated floor against those entries one by one. Whether the canary should also hook `SubagentStop`, as §5 first assumed: no, not for the host's own built-in subagents — [the decision note](decisions/2026-09-27-the-canary-checks-the-main-session-only.md), answered in C1d with a real recording of both a briefed and an unbriefed subagent; reopens when `C2` gives harnex its own subagent types.
 
 ## 14. Risks
 

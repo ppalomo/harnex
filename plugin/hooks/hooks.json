@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --quiet \"${CLAUDE_PLUGIN_ROOT}/feedback/canary/canary.py\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

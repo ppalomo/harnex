@@ -6,8 +6,11 @@ The vitals: how the harness knows whether what just happened was any good.
 
 - **The check command**: how a harnessed project's own tests and linters are run, and what
   counts as evidence that they passed.
-- **The canary check** under `canary/`: the script that reads the last answer and warns
-  when the agreed word is missing, which is how a lost instruction set is detected.
+- **The canary check** under `canary/`: `canary.py`, run by the plugin's `Stop` hook at
+  the end of every main-session answer. Inert without `.harnex.yml` or without the
+  `canary` set; warns the person, never the model, when the project's word is missing.
+  Checks the main session only — a built-in subagent is not briefed on the project's
+  instructions, so a missing word there proves nothing (see `docs/decisions/`).
 - **The decision journal** under `journal/`: the format every decision is appended in, so
   thresholds can later be tuned on evidence instead of taste.
 
@@ -22,5 +25,6 @@ The vitals: how the harness knows whether what just happened was any good.
 
 ## Filled by
 
-`C1d` — the canary check and the hook that runs it at the end of an answer. Then `C4` for
-the guard's journal entries, and `C5` for the verification that closes a change.
+`C1d` — **delivered**: the canary check and the `Stop` hook that runs it at the end of the
+main session's answers. Next: `C4` for the guard's journal entries, and `C5` for the
+verification that closes a change.
