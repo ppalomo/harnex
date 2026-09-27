@@ -290,3 +290,88 @@ manifest and `${CLAUDE_PLUGIN_ROOT}`), OpenSpec 1.11.0, Python 3.13 through `uv`
   deliberately not committed. It asks nothing.
 - Step 11: every check passes. Without the environment variable, four checks skip and say
   which half did not run.
+
+---
+
+## canary-enforces-itself (C1d)
+
+**Delivers:** the canary check (`plugin/feedback/canary/canary.py`) and the plugin's
+`Stop` hook that runs it at the end of every main-session answer. Inert without
+`.harnex.yml` or without the `canary` set; warns the person, never the model, when the
+project's word is missing from the end of an answer.
+
+**Verified against:** Claude Code 2.1.267 (`Stop` hook payload shape, plugin hook
+registration), Python 3.13 through `uv`.
+
+**Steps**
+
+1. Install the plugin from your checkout and confirm the hook it now contributes:
+   ```bash
+   claude plugin marketplace add ./
+   claude plugin install harnex@harnex
+   claude plugin details harnex
+   ```
+2. Set up a scratch project choosing only the `canary` set:
+   ```bash
+   mkdir -p /tmp/harnex-canary && cd /tmp/harnex-canary && git init -q
+   cd ~/Developer/harnex
+   cat > /tmp/harnex-canary-answers.json <<'JSON'
+   {"project_name": "canary-smoke", "profiles": [], "sets": ["canary"], "features": [],
+    "canary": "Hullaballoo!", "decision_model": "mock", "check_command": "make check",
+    "approvals": {"pointer_agents": true, "pointer_claude": true, "adopt": []}}
+   JSON
+   uv run plugin/scripts/setup.py write --answers /tmp/harnex-canary-answers.json \
+     --project /tmp/harnex-canary
+   grep -A3 "## Canary" /tmp/harnex-canary/AGENTS.md
+   ```
+3. Open a session in it (`cd /tmp/harnex-canary && claude`) and ask anything. Read the
+   answer.
+4. In the same session, ask it to answer without the word on purpose — the deliberate
+   miss that proves the check is not blind, worth repeating each time you verify against
+   a new host version, not only the first time: *"Answer in one short sentence and do
+   not end it with the canary word."*
+5. Leave the session. Remove the set and ask again from a fresh one:
+   ```bash
+   sed -i '' 's/  - canary/  - git/' /tmp/harnex-canary/.harnex.yml
+   cd /tmp/harnex-canary && claude
+   ```
+   Ask it to answer without the word again.
+6. A project that never ran setup:
+   ```bash
+   mkdir -p /tmp/harnex-canary-none && cd /tmp/harnex-canary-none && git init -q && claude
+   ```
+   Ask anything.
+7. Confirm the mechanism itself headlessly, for a record that does not depend on reading
+   an interactive transcript:
+   ```bash
+   cd /tmp/harnex-canary
+   git checkout -- .harnex.yml   # sets: canary again
+   claude -p "Answer in one short sentence, no canary word." \
+     --dangerously-skip-permissions --debug-file /tmp/harnex-canary-debug.log > /dev/null
+   grep systemMessage /tmp/harnex-canary-debug.log
+   ```
+8. Tidy up:
+   `rm -rf /tmp/harnex-canary /tmp/harnex-canary-none /tmp/harnex-canary-answers.json /tmp/harnex-canary-debug.log`.
+
+**Expect**
+
+- Step 1: harnex `0.1.0` now lists **1 hook (`Stop`)**, marked "harness-only — no model
+  context cost": a hook adds no always-on tokens to a session.
+- Step 2: `AGENTS.md` states the word in its own `## Canary` section. `.harnex/rules.md`
+  is a pure function of the chosen sets, so the rule there stays generic ("the word the
+  project declares"); the word itself is the project's own fact, so it is written into
+  `AGENTS.md` instead. Without this, a model has no way to learn its own canary word.
+- Step 3: the answer ends with `Hullaballoo!`, and nothing is shown about the canary —
+  the check has nothing to report.
+- Step 4: a warning naming the word, saying this instruction was not followed and that
+  the rules may no longer be in effect — **never** that the context is lost — and the
+  session carries on; the model is not asked to continue or retry the word. This shows in
+  an interactive session or the desktop app's transcript; `claude -p`'s plain-text output
+  does not print it (see step 7 for how to confirm it fired anyway).
+- Step 5: the same missing word, and no warning at all — removing the set makes the check
+  inert, not lenient.
+- Step 6: silence — the check goes no further than confirming `.harnex.yml` is not there.
+- Step 7: the debug log holds one line naming the `Stop` hook's own output —
+  `{"systemMessage": "The canary word \`Hullaballoo!\` is missing from the end of this
+  answer. ..."}` — proof the check ran and found what was expected, independent of
+  whether the interface you used rendered it.

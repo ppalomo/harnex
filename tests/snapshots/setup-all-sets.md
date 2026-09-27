@@ -103,7 +103,7 @@
   },
   "format": 1,
   "paths": {
-    ".harnex/rules.md": "52e73bcf930d85d6fca12c334964de3176d6a0a32ddf5cf400455422de41379e",
+    ".harnex/rules.md": "3d50bcc7c5da21e00ee3ac67c8eafdada1bbd5d5992ca90c047ee0553a0be2ae",
     ".harnex/state/.gitignore": "ff73664601b6084ee71a6c73e1e9e27f039c023bf6fce320496df7614f8b8365"
   }
 }
@@ -128,10 +128,12 @@ Sets in this file: canary, code, git, language, safety, sdd.
 The canary is a cheap, continuous test that the instructions are still in the context. A
 model that has lost them keeps answering fluently and stops following them, and there is
 no other signal that distinguishes that from a model that simply disagreed. A missing
-canary word means the instructions are gone: compact, or start again.
+canary word is a signal that this one instruction was not followed in that answer — not a
+diagnosis that the rules are gone, but the cheapest sign that they may no longer be in
+effect. Compacting or starting a new session is the usual remedy.
 
-**Enforced by:** the canary check of pillar 5, which reads the last answer at the end of
-each turn and warns when the word is absent.
+**Enforced by:** the canary check, `feedback/canary/canary.py` (pillar 5), run by the
+plugin's Stop hook on the main session's answers only.
 
 ## code
 
@@ -319,6 +321,12 @@ this from this file asks you rather than assuming.
 ## What is off limits
 
 The paths, the data and the actions that are never touched without asking you first.
+
+## Canary
+
+End every answer with the word `Hullaballoo!`. The harness's `Stop` hook
+reads it and warns — never blocks — when it is missing, which is the cheapest
+sign these instructions have dropped out of context.
 
 ## Rules
 
