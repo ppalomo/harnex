@@ -1,0 +1,20 @@
+id: task.scope
+type: noul
+state_fields: task_text, changed_paths
+option.true: The changed paths are in scope for what this task's own text asks for.
+option.false: The changed paths are out of scope for this task.
+rule_threshold: 0.85
+rule_threshold_low: 0.35
+---
+
+# Are the changed paths in scope for this task?
+
+`apply` asks this only for a task that declares no paths of its own — a task with
+declared paths is checked deterministically instead (`builder-role`), no network call, no
+model judgement. Asked only when there is no fixed list to compare against.
+
+**State:** `task_text` (the task's own text, from `tasks.md`), `changed_paths` (what the
+builder actually touched, newline-joined — never a JSON list).
+
+**Rule:** in scope at or above 0.85; out of scope at or below 0.35; between the two, ask
+the person rather than guess.

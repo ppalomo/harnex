@@ -447,3 +447,87 @@ step 6 is where that gets its first real check.
   `0.70`; either way, no exception, no hang past `decide.py`'s own time budget, and the
   request/response shapes match what `design.md` recorded from OpenRouter's docs — or a
   fix to `decide.py`, recorded here, if they do not.
+
+---
+
+## apply-through-codex (C3)
+
+**Delivers:** the `builder` role and its two bindings (Codex, through its plugin, and a
+Claude fallback subagent), `task.route` and `task.scope` (the first `noul`-typed
+question), `decide_many()`, the path/protected-path checks (`task_scope_check.py`), the
+`apply_loop.py` script (fingerprinting, run state, routing, acceptance, ticking), and
+`/harnex:apply` — a change's tasks built end to end without the person writing code, the
+loop itself checking and ticking, never the builder. Requires a fresh Claude Code session
+after installing this version of the plugin, for the same reason `C2` does.
+
+**Verified against:** every deterministic step (`decide.py`'s `noul`/`decide_many`
+additions, `task_scope_check.py`, `apply_loop.py`'s fingerprint/run-state/route/accept/
+tick CLI verbs) against `uv run --with pytest pytest` and a hand-run walkthrough of the
+same CLI verbs against a real scratch git repository, standing in for the builder by hand
+(both a normal accept and a protected-path refusal, on a clean and an already-dirty tree).
+**Not yet run:** the full `/harnex:apply` skill through a live session — it needs the
+`builder` agent type loaded, which needs this version of the plugin installed and the
+session reloaded first (steps 1–2 below); and a live Codex call, still blocked by the
+account entitlement gap [S1](decisions/2026-09-27-s1-delegating-to-codex.md) found, so
+step 4's Codex branch is this change's own remaining "try it" step, same as `C2` left a
+live `jev` call as its.
+
+**Steps**
+
+1. Install this version of the plugin, from a fresh session:
+   ```bash
+   claude plugin marketplace add ./
+   claude plugin install harnex@harnex
+   claude plugin details harnex
+   ```
+2. Set up a scratch project with `decision_model: mock` and the `openspec` CLI on its
+   `PATH`:
+   ```bash
+   mkdir -p /tmp/harnex-apply && cd /tmp/harnex-apply && git init -q -b main
+   cd ~/Developer/harnex
+   cat > /tmp/harnex-apply-answers.json <<'JSON'
+   {"project_name": "apply-smoke", "profiles": [], "sets": ["git", "sdd", "code"], "features": [],
+    "canary": "", "decision_model": "mock", "check_command": "python3 -m py_compile greeting.py farewell.py",
+    "approvals": {"pointer_agents": true, "pointer_claude": true, "adopt": []}}
+   JSON
+   uv run plugin/scripts/setup.py write --answers /tmp/harnex-apply-answers.json \
+     --project /tmp/harnex-apply
+   cd /tmp/harnex-apply && openspec init -q 2>/dev/null || true
+   ```
+3. Open a session in it (`cd /tmp/harnex-apply && claude`), run `/harnex:propose` for a
+   two-task idea whose tasks each name a file in backticks (e.g. "a `greeting.py` that
+   prints hello and a `farewell.py` that prints bye"), then run `/harnex:apply`.
+4. Watch: the branch checked out before anything else, both tasks' `Decision:
+   apply(<id>) → <binding> · confidence <n>` lines printed together before the first
+   builder starts, then per task the check and its evidence, and the task ticked in
+   `tasks.md` — never by the builder. For the Claude-routed task, confirm the `builder`
+   subagent never touches `tasks.md` itself. If a task routes to Codex, confirm the
+   branch from step 1 was already checked out before the call, per
+   [S1](decisions/2026-09-27-s1-delegating-to-codex.md)'s finding that `/codex:rescue`
+   has no `--cwd` of its own.
+5. Break the check on purpose (edit the file `apply` just wrote to fail
+   `check_command`), run `/harnex:apply` again for that same task, and watch the one fix
+   attempt: accepted if it passes, escalated — not retried again — if it still fails.
+6. Interrupt `/harnex:apply` mid-task (close the session) and run it again. Confirm the
+   already-accepted task is untouched and the interrupted one resumes from its recorded
+   state or asks, per `apply_loop.py`'s `resume_action`.
+7. Read `.harnex/state/apply/<change>.json` and confirm every task's transitions are
+   there, and `.harnex/state/journal.jsonl` for one `task.route` entry per task (and a
+   `task.scope` entry for any task that declared no paths).
+8. Tidy up: `rm -rf /tmp/harnex-apply /tmp/harnex-apply-answers.json`.
+
+**Expect**
+
+- Step 1: harnex now lists **1 skill** more than `C2` (`apply`) and **1 agent** more
+  (`builder`).
+- Step 4: the decision lines appear together, before any builder starts — the person
+  sees the whole run's routing up front, not staggered between tasks (design.md D6). The
+  files `greeting.py`/`farewell.py` exist, match what the task asked for, and `tasks.md`
+  shows both ticked, each by the loop's own act.
+- Step 5: the fix attempt either lands (a second, passing check, then ticked) or
+  escalates once and stops — never a second fix attempt on the same failure.
+- Step 6: run state shows the interrupted task's last recorded transition; nothing about
+  an already-accepted task changes on the second run.
+- Step 7: one journal line per `task.route` question (one per task, sharing no state —
+  `decide_many`'s one batched call, design.md D2) and, for any paths-less task, one more
+  for `task.scope`.

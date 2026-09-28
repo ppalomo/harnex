@@ -28,5 +28,8 @@ The vitals: how the harness knows whether what just happened was any good.
 `C1d` — **delivered**: the canary check and the `Stop` hook that runs it at the end of the
 main session's answers. `C2` — **delivered**: the decision journal's format, exercised by
 `decide.py`'s first real question; `scope_check.py` under `../feedback/`, the detection
-for the `sdd` rule `the-proposal-is-the-scope`. Next: `C4` for the guard's journal entries,
-and `C5` for the verification that closes a change.
+for the `sdd` rule `the-proposal-is-the-scope`. `C3` — **delivered**:
+`task_scope_check.py`, the declared-path and protected-path checks the apply loop runs
+after every builder writes, the detection for the `code` rule `no-scope-beyond-the-task`
+and the `sdd` rule `builders-never-tick-tasks`. Next: `C4` for the guard's journal
+entries, and `C5` for the verification that closes a change.
