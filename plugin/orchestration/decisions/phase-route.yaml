@@ -1,0 +1,23 @@
+id: phase.route
+type: choice
+state_fields: phase, task, profiles
+option.codex: Delegate to Codex through its plugin — well-scoped implementation with tests already named.
+option.claude-sonnet: A Claude subagent on Sonnet — the default for ordinary work.
+option.claude-opus: A Claude subagent on Opus — hard design or ambiguous reasoning.
+option.claude-fable: A Claude subagent on Fable — long-form or narrative-heavy design writing.
+option.human: Ask the person — a judgement only they can make.
+rule_threshold: 0.70
+---
+
+# Which tool and model should run this phase?
+
+`explore` and `propose` run in the main session, whose model harnex cannot switch, so this
+question is advice only for them: the screen line says "advice" and a low-confidence
+answer is shown, not enforced. `verify` binds it.
+
+**State:** `phase` (the command name), `task` (the person's own framing, one paragraph,
+never the model's description of its own work), `profiles` (the project's chosen stack
+profiles).
+
+**Rule:** the option with the highest probability, if that probability is at least 0.70;
+otherwise ask the person which one they want.

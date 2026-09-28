@@ -375,3 +375,75 @@ registration), Python 3.13 through `uv`.
   `{"systemMessage": "The canary word \`Hullaballoo!\` is missing from the end of this
   answer. ..."}` — proof the check ran and found what was expected, independent of
   whether the interface you used rendered it.
+
+---
+
+## explore-and-propose (C2)
+
+**Delivers:** `decide.py` (`decide()`, the `mock` and `jev` backends, the decision
+journal), the `phase.route` question, the `verifier` role and its Claude Code adapter,
+`scope_check.py`, and the `/harnex:explore` and `/harnex:propose` skills — a change
+proposed and design-reviewed end to end without ever running `openspec` by hand. Requires
+a fresh Claude Code session after installing this version of the plugin: skills are
+resolved once at session start, so a session already open when the plugin updates will not
+see them.
+
+**Verified against:** Claude Code 2.1.269, `openspec` CLI (whichever version your `PATH`
+resolves), Python 3.13 through `uv`. The OpenRouter Decisions endpoint shape in
+`decide.py` is read from OpenRouter's own docs, not yet exercised against a live key —
+step 6 is where that gets its first real check.
+
+**Steps**
+
+1. Install this version of the plugin, from a fresh session:
+   ```bash
+   claude plugin marketplace add ./
+   claude plugin install harnex@harnex
+   claude plugin details harnex
+   ```
+2. Set up a scratch project with `decision_model: mock` and the `openspec` CLI on its
+   `PATH` (harnex never installs OpenSpec itself):
+   ```bash
+   mkdir -p /tmp/harnex-propose && cd /tmp/harnex-propose && git init -q
+   cd ~/Developer/harnex
+   cat > /tmp/harnex-propose-answers.json <<'JSON'
+   {"project_name": "propose-smoke", "profiles": [], "sets": ["git", "sdd"], "features": [],
+    "canary": "", "decision_model": "mock", "check_command": "make check",
+    "approvals": {"pointer_agents": true, "pointer_claude": true, "adopt": []}}
+   JSON
+   uv run plugin/scripts/setup.py write --answers /tmp/harnex-propose-answers.json \
+     --project /tmp/harnex-propose
+   cd /tmp/harnex-propose && openspec init -q 2>/dev/null || true
+   ```
+3. Open a session in it (`cd /tmp/harnex-propose && claude`) and run
+   `/harnex:explore "a small idea, e.g. add a health-check endpoint"`.
+4. In the same session, run `/harnex:propose`. Watch the `Decision (advice):` line appear
+   first, then the artifacts written under `openspec/changes/<name>/`, then the scope
+   check's report, then the verifier's review.
+5. Read the change's `.harnex/state/journal.jsonl` — one line per `decide.py` call, both
+   from `explore` and `propose`.
+6. If `OPENROUTER_API_KEY` is set, switch the project to `decision_model: jev` and repeat
+   step 4 in a fresh session. Compare the request `decide.py` actually sent and the
+   response it got back against `design.md`'s Context section in this change's own
+   `openspec/changes/` (before it is archived) — record any mismatch and fix `decide.py`
+   against the real shape.
+7. Tidy up: `rm -rf /tmp/harnex-propose /tmp/harnex-propose-answers.json`.
+
+**Expect**
+
+- Step 1: harnex now lists **2 skills** more than `C1c` (`explore`, `propose`) and **1
+  agent** (`verifier`).
+- Step 3: no file is written under `openspec/`; the session ends with `explore` suggesting
+  `/harnex:propose` once the idea feels clear, never asking which tool or model should run
+  it.
+- Step 4: `proposal.md`, every delta spec the proposal names, `design.md` where the schema
+  needs one, and `tasks.md` all exist; the person is never asked to name an artifact id or
+  a schema. The scope check reports nothing was written outside the change's own
+  directory. The verifier's review says plainly whether it found a contradiction, and
+  `propose` finishes either way — it does not block on the review.
+- Step 5: at least two journal lines (one per `phase.route` call), each with `backend:
+  "mock"`, `decision: null`, and an empty `resolution`.
+- Step 6: a resolved decision with `backend: "jev"` when the top probability is at least
+  `0.70`; either way, no exception, no hang past `decide.py`'s own time budget, and the
+  request/response shapes match what `design.md` recorded from OpenRouter's docs — or a
+  fix to `decide.py`, recorded here, if they do not.

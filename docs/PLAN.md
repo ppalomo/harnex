@@ -153,8 +153,8 @@ its own sandbox.
 | write only what the role may write | I · D: `propose` reports any change outside the change's directory | I · D: changed paths ⊆ the task's declared paths | I · D: same check | I · P: `tools` has no `Edit`, `Write` or `Bash` |
 | never tick `tasks.md`, never edit specs | — (the architect writes them) | I · D: protected paths (`openspec/`, `.harnex/`) unchanged after the delegation | I · D: same check | P: as above |
 | commit only in `ship` | I · P: guard asks, floor asks | I · D: `HEAD` and refs unchanged after the delegation | I · P: guard asks, floor asks | P: as above |
-| destructive commands, deletions, pushes ask | I · P: guard + floor | I · P: Codex's own sandbox and approval policy, as the S1 spike finds it · D: the diff is read before acceptance | I · P: guard + floor | P: as above |
-| credentials never leave the machine | I · P: floor denies reading secret files; guard asks | I · P: Codex sandbox | I · P: floor + guard | P: as above |
+| destructive commands, deletions, pushes ask | I · P: guard + floor | I only, in practice: `approvalPolicy` is hardcoded to `never` for every delegated call, so Codex itself never pauses to ask ([S1](decisions/2026-09-27-s1-delegating-to-codex.md)) — the ask has to come from harnex's own guard, once C4 lands · D: the diff is read before acceptance | I · P: guard + floor | P: as above |
+| credentials never leave the machine | I · P: floor denies reading secret files; guard asks | I · P: Codex CLI's own `read-only`/`workspace-write` sandbox toggle, as read from `codex.mjs` — [S1](decisions/2026-09-27-s1-delegating-to-codex.md) could not confirm this by observation; a live run is owed before C3 treats it as measured | I · P: floor + guard | P: as above |
 | answers end with the canary word | I · D: Stop hook | I only | I · D: SubagentStop hook, when the set is on | I · D: SubagentStop hook |
 
 **What v0.1 honestly offers:** the builder's boundaries are instruction plus
@@ -371,6 +371,40 @@ Every decision is appended to `.harnex/state/journal.jsonl` with `question`,
 `resolution` field filled when you override or when the outcome is known, so thresholds
 can be tuned on evidence. Screen line format is fixed: `Decision: <phase> → <tool> · <model> · <confidence>`.
 
+**Routing happens only at subagent-spawn granularity, never mid-conversation.** `jev-router`
+(a public proxy that routes Claude Code and Codex by intercepting an already-running
+session and rewriting which model answers) shows why the alternative is worth avoiding: its
+own benchmark finds routing *degrades* feature tasks in Claude Code (+16–61% input tokens,
+up to +83% time), because once extended thinking is on, its proxy can only `hint` a cheaper
+tool choice rather than force it — the model reads the hint, may ignore it, and the context
+cost is spent either way. Codex fares better there because its protocol allows a forced
+choice. `phase.route` and `task.route` never face this: they pick a model *before* a fresh
+Claude subagent or a Codex job starts, so there is nothing running to hint at and nothing to
+ignore. This is a deliberate consequence of §4's role boundaries, not an oversight — worth
+keeping in mind if a later phase is ever tempted to route an in-flight session instead of a
+fresh one.
+
+**Three implementation notes for `decide.py` and the question YAML**, from how Jev's own
+CLI and gateway are used in practice elsewhere:
+- **Never key `state` by position.** Referencing items in an array by index (`candidates[i]`)
+  degrades badly on a Noul/Choice/Score call over a long list (one measurement: 27% wrong
+  answers at 150 items); keying the object (`candidates.k137`) or embedding the item directly
+  in the question text measured 0% wrong up to 320 items. Any question whose `state` carries
+  a list — `phase.route`'s file list, a future ranking of tasks — keys or embeds, never
+  indexes.
+- **Batch independent questions in one call where `apply` asks several at once.** Jev answers
+  several typed questions (Noul, Choice, Score) in parallel within a single ~250 ms request
+  at no extra latency. C3's loop asks `task.route` and, for paths-less tasks, `task.scope`
+  once per task; when a change has several such tasks queued at once, one batched call beats
+  one call per task. Worth a `decide_many()` alongside `decide()` when C3 is designed, not
+  before.
+- **Don't spend a decision call re-routing a task mid-retry just to save tokens.** A
+  cross-project routing rule worth carrying even though harnex doesn't proxy live sessions:
+  switching backend or model mid-task can cost more than it saves once meaningful context or
+  prompt-cache is already built up for that task. §10's "a retry is a fix, not a re-check"
+  already keeps the same builder for a retry; this is the reason that rule should hold even
+  if a cheaper option would score well on `task.route` at retry time.
+
 ## 9. The shell guard and the permission floor
 
 Two layers, because one hook cannot promise what it cannot deliver.
@@ -447,7 +481,17 @@ with you watching, and does not assume you are:
   status first; if its outcome cannot be recovered, `apply` shows you the diff since the
   task's base fingerprint and asks: keep it and check it, discard it (a destructive
   action, so it asks), or delegate again. It never re-delegates onto a dirty tree without
-  asking.
+  asking. Two things [S1](decisions/2026-09-27-s1-delegating-to-codex.md) found narrow
+  what "looked up first" can promise: a job's own record only ever says `running` or
+  `done` — nothing checks whether its process is still alive — so `apply` needs its own
+  staleness rule (no progress for some interval) before trusting `running`; and a job
+  survives only past a session that ends **uncleanly**, since a normal session end kills
+  its own background jobs outright. Recovery-by-lookup is therefore for a crash, not for
+  quitting normally mid-task — a normal exit leaves nothing to look up.
+- **Branch or worktree isolation is harnex's job, not Codex's.** `/codex:rescue` never
+  creates one and has no option to target one; it runs wherever its `--cwd` points
+  ([S1](decisions/2026-09-27-s1-delegating-to-codex.md)). Before delegating, `apply`
+  checks out the change's branch (or a worktree of it) itself and passes that path.
 
 ## 11. Roadmap — one capability per phase
 
@@ -509,16 +553,23 @@ enforces itself. Each is its own OpenSpec change, in this order.
   - **A subagent's silence is not the same signal as the main session's.** A `general-purpose` subagent, briefed on the project's instructions, ended with the word; a built-in `Explore` subagent, never briefed on them, did not — recorded from the same session, so the only variable was which agent type answered. Hooking `SubagentStop` today would warn on every `Explore` call regardless of anything going wrong, training the person to ignore the signal. Decided and recorded in `docs/decisions/`; reopens with `C2`'s own subagents, whose prompts harnex writes.
   - **A hook's warning does not reach every surface the same way.** The `Stop` hook's `systemMessage` shows in an interactive session's transcript and in the desktop app, but `claude -p`'s plain-text output never prints it — only `--debug-file` does. A manual check written against headless output alone would have called a working hook silent.
 
-### S1 · spike: delegating to Codex — before C2
+### S1 · spike: delegating to Codex — before C2 — **run**, [decision note](decisions/2026-09-27-s1-delegating-to-codex.md)
 - **Answers**, recorded in `docs/decisions/`: whether `/codex:rescue` takes a task reliably, on which branch or worktree it works and whether it can be pointed at one; how its job status and result are read back, and what survives an interruption (the recovery contract of §10 depends on it); what its sandbox lets it do to `.git` — commit, move refs — and to paths outside the workspace; what evidence comes back. Timeboxed to a day, run in parallel with C1c or C1d, against a scratch repository.
 - **Why now:** C2 prints routing decisions that name Codex, and C3's loop is built on answers the plan currently assumes. If Codex cannot be pointed at the change's branch, or its jobs cannot be recovered, the design of §10 changes before any code depends on it.
-- **Exit:** each question has an answer with the transcript that shows it, and §10 and the §4 matrix are corrected where the answers differ from the assumptions.
+- **Exit:** each question has an answer with the transcript that shows it, and §10 and the §4 matrix are corrected where the answers differ from the assumptions. **Partially met**: every model tried returns `400 invalid_request_error … not supported when using Codex with a ChatGPT account`, unchanged after updating the CLI and after a fresh `codex login` — the plugin's own `setup --json` diagnostic reports the login verified, so this traces to the account's own Codex entitlement, not to a stale token or a need for an API key. All four answers therefore come from `codex-companion.mjs`'s own source and its fake-fixture tests, not a live transcript. §10 and §4 are corrected below on that basis; C3 budgets one live run to confirm §3's sandbox claim and §2's interruption behaviour before treating them as measured.
 
-### C2 · explore and propose
-- **Delivers:** the two architect commands wrapping OpenSpec's explore and propose invisibly; the decision client with `mock` and `jev` backends; `phase.route` and its screen line, marked as advice for these main-session phases; a **minimal `verifier`** — a read-only subagent whose `tools` list has no `Edit`, `Write` or `Bash` — doing the design review inside `propose`; the path check that reports anything `propose` wrote outside the change's directory.
-- **You try it:** `/harnex:explore "an idea"` in the scratch project, then `/harnex:propose`. You see the `Decision (advice):` line first, then the artifacts appear under `openspec/changes/`, then the verifier's review. With `OPENROUTER_API_KEY` set and `decision_model: jev`, the line comes from Jev; with `mock`, it asks you.
-- **Tests:** unit tests of `decide.py` against recorded OpenRouter responses and the mock, including a hanging endpoint; the journal gets one line per decision; command and verifier frontmatter, asserting the verifier's `tools`.
-- **Exit:** a change is proposed and design-reviewed end to end without you ever typing `openspec`.
+### C2 · explore and propose — **delivered**, change `explore-and-propose`
+- **Delivers:** `plugin/scripts/decide.py` — `decide(question, state, backend)`, the `mock` and `jev` backends, the decision journal at `.harnex/state/journal.jsonl` — plus the decision-question file format under `plugin/orchestration/decisions/` (YAML-*shaped*, like a rule) and its first question, `phase.route`; the `verifier` role, split as `orchestration/roles/verifier.md` (tool-agnostic) and `agents/verifier.md` (the Claude Code binding, read-only by its `tools` list); `plugin/feedback/scope_check.py`, the detection for the `sdd` rule `the-proposal-is-the-scope` (`enforced_by` now `check`, not `none`); `plugin/orchestration/workflow.md`, naming all five phases and what each may write; and the two skills, `plugin/skills/explore/` and `plugin/skills/propose/`, which drive the `openspec` CLI directly rather than depend on OpenSpec's own assistant skills being installed in the target project.
+- **You try it:** `/harnex:explore "an idea"` in the scratch project, then `/harnex:propose`. You see the `Decision (advice):` line first, then the artifacts appear under `openspec/changes/`, then the scope check's report, then the verifier's review. With `mock`, the line says the advice is unavailable and moves on — it never asks you to pick a tool or model for a phase you cannot switch mid-session anyway; with `OPENROUTER_API_KEY` set and `decision_model: jev`, the line comes from Jev. Full steps in [smoke.md](smoke.md).
+- **Tests:** the question-file parser and its faults; both backends' request-building and response-handling against the exact shapes read from OpenRouter's own docs; the `jev` backend's retry-once-within-budget behaviour against a stubbed hanging socket, a stubbed 5xx-then-success, a stubbed 4xx, and a missing key; the journal, one line per call; the scope check against a real git repository, including a rename and a path already dirty before the run; agent and skill frontmatter, asserting the verifier's `tools` and that its adapter's body is an exact copy of its role prompt.
+- **Exit:** met by construction and by the automated tests; the live end-to-end try (`smoke.md`) needs a fresh Claude Code session, since a session resolves a plugin's skills once at start and this one was built inside the session that will report it — left for the next session to run.
+- **What it taught us**, verified against Claude Code `2.1.269` and OpenRouter's own docs (2026-09-28):
+  - **A decision that cannot be acted on should not be asked as a question.** §8's contract for `decide.py` — any failure degrades to the same shape as `mock`, and the caller then "asks the person" — is right for a question that binds, like `guard.risk` will be. For `phase.route` inside `explore`/`propose`, which only ever prints advice because the main session's model cannot be switched mid-conversation, asking the person to pick a tool they cannot use would be pure friction. The skills print "unavailable" and move on; nothing about `decide.py`'s own contract changed to make this possible — the distinction lives entirely in what the caller does with an unresolved outcome.
+  - **A format described as "YAML" in the plan is YAML-*shaped*, the same call C1b made for rules, for the same reason (decision 15).** The decision-question file has one `---` line, not a rule's two, since there is nothing before the fields to close off — a small format decision worth recording so it is not re-litigated when `C3`/`C4` add `task.scope` and `guard.risk`.
+  - **An agent's body cannot import another file.** Fetching Claude Code's own subagent documentation while designing the verifier confirmed there is no `@`-import for a subagent's system prompt, unlike `CLAUDE.md`. The role prompt and its Claude Code adapter are necessarily two files with the same content; a test walks the correspondence exactly the way `C1d` walks rule-to-hook, so the two cannot drift apart unnoticed.
+  - **`git status --porcelain` collapses a brand-new directory to one entry.** The scope check's own test caught this: a change's directory, being new and untracked, was reported as `openspec/` rather than each file inside it, which would have hidden every file `propose` writes from the very check meant to watch them. `--untracked-files=all` is now part of both the snapshot and the live status call.
+  - **`decide.py`'s own script filename does not match what this change's planning artifacts first called it.** `scope-check.py`, as first written in the proposal and design, would not be importable as a Python module and did not match every other script in the repository (`setup.py`, `canary.py`, `decide.py`); it is `scope_check.py`. Recorded here since the plan text above already uses the corrected name.
+  - **The OpenRouter Decisions endpoint's contract was read from its own docs, not exercised live.** `decide.py`'s `jev` backend is built and tested against the exact request and response shapes OpenRouter's documentation shows (§8 already flags `jev` as alpha, §14); a live call, once a working key is available, is this change's one remaining "you try it" step, and any mismatch is a fix to `decide.py`, not to the docs.
 
 ### C3 · apply through Codex
 - **Delivers:** the `builder` role, the Claude fallback subagent, the two profiles moved from the old kits, `task.route`, the path and protected-path checks, `task.scope` for tasks without declared paths, and the loop of §10 with its run state, fingerprinted evidence, one fix per failure and recovery — built on the answers of S1. The `sdd` and `code` rules the loop now checks (`builders-never-tick-tasks`, `no-scope-beyond-the-task`) are restated to name the path and protected-path checks as their detection.
@@ -592,12 +643,12 @@ surface. Never: an unattended mode.
 
 ## 13. Open questions
 
-- Whether `/codex:rescue` can be pointed at a specific branch or worktree, how its jobs are recovered after an interruption, and what its sandbox lets it do to `.git` (answered by the S1 spike, before C2).
 - Whether the decision backend for the guard should be allowed in `mock` mode at all, since it would ask on every ambiguous command (default: yes, with the allowlist doing most of the work).
 - Which additional MCP servers, if any, the profiles should declare.
 - Whether Codex, started through its plugin, honours the `TRACEPARENT` Claude Code passes to Bash, so its spans join the session's trace (S1); and C2's `decide.py` forwarding the session id to OpenRouter as `session_id`. Both serve the owner's [observability bench](observability.md), which is local configuration on the owner's machine and never ships in the plugin.
+- Whether the owner's Codex/ChatGPT account can negotiate any model at all: S1 found every model tried, including a plain non-Codex one, returning "not supported when using Codex with a ChatGPT account" with a "model metadata not found" warning first, and a fresh `codex login` mid-spike changed nothing — ruling out a stale token, and ruling out needing an API key (the plugin's own README and its `setup --json` diagnostic both say the ChatGPT-subscription login this account has is sufficient, and that login is verified). What's left points at the account's own Codex entitlement or an OpenAI-side rollout gap, resolvable only outside harnex. C3 cannot deliver a working builder role on the Codex side until one live run succeeds.
 
-Answered since v2: the Stop hook receives the last assistant message directly, in `last_assistant_message` (Claude Code docs, 2.1.267); C1d records a real payload to confirm it. Whether the host's permission syntax can express every deny and ask pattern: yes, for every rule the harness states, with the residue recorded in `floor.json` as `guard_only` — [the decision note](decisions/2026-09-25-the-permission-floor-in-the-hosts-syntax.md), answered in C1c; C4 checks its regenerated floor against those entries one by one. Whether the canary should also hook `SubagentStop`, as §5 first assumed: no, not for the host's own built-in subagents — [the decision note](decisions/2026-09-27-the-canary-checks-the-main-session-only.md), answered in C1d with a real recording of both a briefed and an unbriefed subagent; reopens when `C2` gives harnex its own subagent types.
+Answered since v2: the Stop hook receives the last assistant message directly, in `last_assistant_message` (Claude Code docs, 2.1.267); C1d records a real payload to confirm it. Whether the host's permission syntax can express every deny and ask pattern: yes, for every rule the harness states, with the residue recorded in `floor.json` as `guard_only` — [the decision note](decisions/2026-09-25-the-permission-floor-in-the-hosts-syntax.md), answered in C1c; C4 checks its regenerated floor against those entries one by one. Whether the canary should also hook `SubagentStop`, as §5 first assumed: no, not for the host's own built-in subagents — [the decision note](decisions/2026-09-27-the-canary-checks-the-main-session-only.md), answered in C1d with a real recording of both a briefed and an unbriefed subagent; reopens when `C2` gives harnex its own subagent types. Whether `/codex:rescue` can be pointed at a branch or worktree, how its jobs are recovered after an interruption, and what its sandbox lets it do to `.git`: no targeting of its own (harnex's `apply` must checkout or worktree first and pass `--cwd`), a job record that never distinguishes a stale pid from a live one, and a sandbox toggle read from source only, not observed — [the decision note](decisions/2026-09-27-s1-delegating-to-codex.md), from S1, run before C2 as planned but blocked from a live transcript by a model-negotiation fault this spike traced to the account's own Codex entitlement, not to the ChatGPT-subscription design (a fresh login, mid-spike, changed nothing, and no API key is expected to be needed); §10 and §4 are corrected on that basis and C3 owes one live run before treating §3's sandbox claim as measured.
 
 ## 14. Risks
 

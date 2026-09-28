@@ -103,7 +103,7 @@
   },
   "format": 1,
   "paths": {
-    ".harnex/rules.md": "3d50bcc7c5da21e00ee3ac67c8eafdada1bbd5d5992ca90c047ee0553a0be2ae",
+    ".harnex/rules.md": "18cc7c2dd279ae118969e56b405df2c97f285708f03c97ad5acc70d687d1c66c",
     ".harnex/state/.gitignore": "ff73664601b6084ee71a6c73e1e9e27f039c023bf6fce320496df7614f8b8365"
   }
 }
@@ -276,6 +276,10 @@ The proposal is what the person approved. Work that falls outside it has not bee
 approved, however obviously good it is. When the boundary turns out to be wrong, stop and
 revise the proposal — which costs a paragraph — rather than quietly delivering something
 else.
+
+**Enforced by:** the scope check, `feedback/scope_check.py` (pillar 5), run by `propose`
+once every required artifact exists. It reports a path written outside the change's own
+directory; it does not stop the write or undo it.
 ===== .harnex/state/.gitignore
 # Runtime state the harness writes while it works: decision journal, apply run state.
 # It ignores itself so that the project's own ignore file is never touched.
