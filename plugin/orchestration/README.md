@@ -14,15 +14,26 @@ The nervous system: who does what, in which order, and who decides.
 
 ## What does not
 
-- **Tool names inside a role prompt.** A role is a contract, not a runtime: the same
-  `builder` prompt must work whichever tool plays it. The adapters that bind a role to a
-  particular runtime live at the plugin root, where the host reads them.
-- **The decision client.** The interface and its backends are scripts; the questions are
-  what lives here.
+- **A role prompt's own content, twice.** A role's Claude Code adapter — the file the host
+  actually reads, under `../agents/` — still belongs to this pillar even though it cannot
+  live inside `orchestration/` itself (the host looks for it at the plugin root) or import
+  the role prompt it binds (an agent's body has no import syntax, verified against Claude
+  Code's own docs while designing `C2`). It is a verbatim copy, and a test walks the
+  correspondence so the two cannot drift apart unnoticed.
 - **Guardrails.** A question that judges *risk* before an action belongs to pillar 4, even
   though it is a decision. Orchestration routes work; control stops it.
 
+## What is here
+
+- `../scripts/decide.py` — the decision interface and its `mock`/`jev` backends. Kept in
+  `scripts/`, where every harness script lives and where `uv run` expects it, not inside
+  this directory — the same reason `../tools/README.md` names `setup.py` the same way.
+- `../agents/verifier.md` — the verifier's Claude Code adapter, binding the role prompt
+  under `roles/verifier.md`. `C3`'s `builder` adds a second adapter the same way.
+
 ## Filled by
 
-`C2` — the workflow, the first role prompts, the routing question and the line it prints
-on screen before anything runs.
+`C2` — **delivered**: the workflow, the `verifier` role prompt and its adapter, the
+`phase.route` question, the decision client, and the advice line it prints on screen
+before anything runs. Next: `C3` adds the `builder` role and `task.route`; `C4` adds
+`guard.risk` in pillar 4, not here.

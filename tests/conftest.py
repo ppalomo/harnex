@@ -33,6 +33,7 @@ def rules_dir(plugin_root: Path) -> Path:
 # The scripts are installed beside the pillars, not as an importable package, so the
 # checks reach them the way the host will: by path.
 sys.path.insert(0, str(REPO_ROOT / "plugin" / "scripts"))
+sys.path.insert(0, str(REPO_ROOT / "plugin" / "feedback"))
 sys.path.insert(0, str(REPO_ROOT / "plugin" / "feedback" / "canary"))
 
 

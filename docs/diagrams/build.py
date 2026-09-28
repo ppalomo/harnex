@@ -410,7 +410,7 @@ def roadmap() -> None:
         ("S1 · spike: Codex", NEUTRAL,
          "delegation, branch, job\nrecovery, sandbox and .git;\nbefore C2",
          "answers recorded in\ndocs/decisions/ with\ntheir transcripts"),
-        ("C2 · explore + propose", ORCH,
+        ("C2 · explore + propose (delivered)", ORCH,
          "the two architect commands,\ndecision client (mock, jev),\nadvice line on screen,\nminimal read-only verifier",
          "run /harnex:explore 'idea',\nthen /harnex:propose →\nsee 'Decision:' and the\nartifacts appear"),
         ("C3 · apply via Codex", TOOLS,
@@ -459,7 +459,7 @@ def layout() -> None:
         ("tools/", TOOLS, "mcp/  context7, markitdown, playwright\nprofiles/  python-fastapi, react-vite (stack know-how)\nthe only place technologies are named"),
         ("orchestration/", ORCH, "workflow.md  the five phases, entry and exit criteria\nroles/  architect, builder, verifier (prompts)\ndecisions/  phase.route, task.route, task.scope (YAML)"),
         ("control/", CONTROL, "floor.json  the permission floor setup merges into settings\nguard/  patterns.yaml, guard.py (PreToolUse hook)\napprovals.md  what always asks you"),
-        ("feedback/", FEEDBACK, "check-command.md  the contract a project declares\ncanary/  canary.py (Stop hook)\njournal/  decision journal format"),
+        ("feedback/", FEEDBACK, "check-command.md  the contract a project declares\ncanary/  canary.py (Stop hook)\nscope_check.py  detects a write outside a change's own directory\njournal/  decision journal format"),
     ]
     prev = plugin
     for i, (name, bg, body) in enumerate(items):

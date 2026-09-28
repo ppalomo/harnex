@@ -26,5 +26,7 @@ The vitals: how the harness knows whether what just happened was any good.
 ## Filled by
 
 `C1d` — **delivered**: the canary check and the `Stop` hook that runs it at the end of the
-main session's answers. Next: `C4` for the guard's journal entries, and `C5` for the
-verification that closes a change.
+main session's answers. `C2` — **delivered**: the decision journal's format, exercised by
+`decide.py`'s first real question; `scope_check.py` under `../feedback/`, the detection
+for the `sdd` rule `the-proposal-is-the-scope`. Next: `C4` for the guard's journal entries,
+and `C5` for the verification that closes a change.
