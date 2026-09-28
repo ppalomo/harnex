@@ -90,6 +90,122 @@ def test_a_choice_question_with_no_options_is_refused(tmp_path: Path) -> None:
         decide.parse_question("".join(lines), tmp_path / "a-question.yaml")
 
 
+def test_a_choice_question_cannot_declare_rule_threshold_low(tmp_path: Path) -> None:
+    text = GOOD_QUESTION.replace("rule_threshold: 0.7", "rule_threshold: 0.7\nrule_threshold_low: 0.3")
+    with pytest.raises(decide.DecisionError, match="only a noul question may declare"):
+        decide.parse_question(text, tmp_path / "a-question.yaml")
+
+
+# --- the noul type ----------------------------------------------------------------------
+
+NOUL_QUESTION = """\
+id: a.scope
+type: noul
+state_fields: task_text, changed_paths
+option.true: The write is in scope for this task.
+option.false: The write is out of scope.
+rule_threshold: 0.85
+rule_threshold_low: 0.35
+---
+
+# Is this write in scope for the task?
+
+Some prose a person or a model reads; `decide.py` never parses it.
+"""
+
+
+def _noul_question(tmp_path: Path, text: str = NOUL_QUESTION) -> decide.Question:
+    directory = _seed(tmp_path, text, name="a-scope.yaml")
+    return decide.load_question("a.scope", directory)
+
+
+def test_a_good_noul_question_parses(tmp_path: Path) -> None:
+    question = _noul_question(tmp_path)
+    assert question.type == "noul"
+    assert question.options == {
+        "true": "The write is in scope for this task.",
+        "false": "The write is out of scope.",
+    }
+    assert question.rule_threshold == 0.85
+    assert question.rule_threshold_low == 0.35
+
+
+def test_a_noul_question_needs_rule_threshold_low(tmp_path: Path) -> None:
+    text = NOUL_QUESTION.replace("rule_threshold_low: 0.35\n", "")
+    with pytest.raises(decide.DecisionError, match="declares no rule_threshold_low"):
+        decide.parse_question(text, tmp_path / "a-scope.yaml")
+
+
+def test_a_noul_question_rejects_a_low_threshold_at_or_above_the_high_one(tmp_path: Path) -> None:
+    text = NOUL_QUESTION.replace("rule_threshold_low: 0.35", "rule_threshold_low: 0.85")
+    with pytest.raises(decide.DecisionError, match="must be below rule_threshold"):
+        decide.parse_question(text, tmp_path / "a-scope.yaml")
+
+
+def test_a_noul_question_must_declare_exactly_true_and_false(tmp_path: Path) -> None:
+    text = NOUL_QUESTION.replace("option.false: The write is out of scope.\n", "")
+    with pytest.raises(decide.DecisionError, match="option.true.*option.false"):
+        decide.parse_question(text, tmp_path / "a-scope.yaml")
+
+
+def test_noul_build_request_matches_the_documented_shape(tmp_path: Path) -> None:
+    question = _noul_question(tmp_path)
+    state = {"task_text": "add a favicon", "changed_paths": "plugin/assets/favicon.svg"}
+    request = decide.build_request(question, state)
+    assert request == {
+        "model": "typesafe/jev-1.13",
+        "state": state,
+        "questions": {
+            "a.scope": {
+                "type": "noul",
+                "instructions": "Is this write in scope for the task?",
+                "criteria": {
+                    "true": "The write is in scope for this task.",
+                    "false": "The write is out of scope.",
+                },
+            }
+        },
+    }
+
+
+NOUL_RESPONSE_HIGH = {
+    "answers": {"a.scope": {"type": "noul", "noul": 0.96}},
+    "usage": {"cost": 0.00001},
+}
+NOUL_RESPONSE_LOW = {
+    "answers": {"a.scope": {"type": "noul", "noul": 0.04}},
+    "usage": {"cost": 0.00001},
+}
+NOUL_RESPONSE_BETWEEN = {
+    "answers": {"a.scope": {"type": "noul", "noul": 0.6}},
+    "usage": {"cost": 0.00001},
+}
+
+
+def test_noul_above_the_high_threshold_resolves_true(tmp_path: Path) -> None:
+    question = _noul_question(tmp_path)
+    outcome = decide.parse_response(question, NOUL_RESPONSE_HIGH)
+    assert outcome["resolved"] is True
+    assert outcome["decision"] == "true"
+    assert outcome["confidence"] == 0.96
+
+
+def test_noul_at_or_below_the_low_threshold_resolves_false(tmp_path: Path) -> None:
+    question = _noul_question(tmp_path)
+    outcome = decide.parse_response(question, NOUL_RESPONSE_LOW)
+    assert outcome["resolved"] is True
+    assert outcome["decision"] == "false"
+    assert outcome["confidence"] == pytest.approx(0.96)
+
+
+def test_noul_between_the_thresholds_does_not_resolve(tmp_path: Path) -> None:
+    question = _noul_question(tmp_path)
+    outcome = decide.parse_response(question, NOUL_RESPONSE_BETWEEN)
+    assert outcome["resolved"] is False
+    assert outcome["reason"] == "between_thresholds"
+    assert outcome["probabilities"] == {"true": 0.6, "false": pytest.approx(0.4)}
+
+
 def test_the_real_phase_route_question_parses(plugin_root: Path) -> None:
     question = decide.load_question("phase.route", plugin_root / "orchestration" / "decisions")
     assert question.type == "choice"
@@ -288,6 +404,116 @@ def test_the_retry_stops_once_the_time_budget_is_gone(tmp_path: Path, monkeypatc
     )
     assert len(calls) == 1, "a second attempt was made after the budget was already spent"
     assert outcome["resolved"] is False
+
+
+# --- decide_many: several distinct questions, one shared state, one call ---------------
+
+
+def test_decide_many_with_mock_answers_each_question_on_its_own(tmp_path: Path) -> None:
+    route = _question(tmp_path)
+    scope = _noul_question(tmp_path)
+    outcomes = decide.decide_many(
+        [
+            (route, {"phase": "apply", "task": "x"}),
+            (scope, {"task_text": "x", "changed_paths": ""}),
+        ],
+        "mock",
+    )
+    assert len(outcomes) == 2
+    assert all(outcome["resolved"] is False and outcome["reason"] == "mock_backend" for outcome in outcomes)
+    assert "Which team should own this ticket?" in outcomes[0]["prompt"]
+    assert "Is this write in scope for the task?" in outcomes[1]["prompt"]
+
+
+def test_build_batch_request_merges_shared_state_and_keys_both_questions(tmp_path: Path) -> None:
+    route = _question(tmp_path)
+    scope = _noul_question(tmp_path)
+    request = decide.build_batch_request(
+        [
+            (route, {"phase": "apply", "task": "x"}),
+            (scope, {"task_text": "y", "changed_paths": "p"}),
+        ]
+    )
+    assert request["state"] == {"phase": "apply", "task": "x", "task_text": "y", "changed_paths": "p"}
+    assert set(request["questions"]) == {"a.question", "a.scope"}
+
+
+def test_build_batch_request_refuses_conflicting_shared_state(tmp_path: Path) -> None:
+    route = _question(tmp_path)
+    scope = _noul_question(tmp_path)
+    with pytest.raises(decide.DecisionError, match="conflicting values"):
+        decide.build_batch_request(
+            [
+                (route, {"task_text": "a"}),
+                (scope, {"task_text": "b", "changed_paths": "p"}),
+            ]
+        )
+
+
+def test_build_batch_request_refuses_duplicate_question_ids(tmp_path: Path) -> None:
+    route = _question(tmp_path)
+    with pytest.raises(decide.DecisionError, match="must be distinct"):
+        decide.build_batch_request([(route, {"task": "a"}), (route, {"task": "b"})])
+
+
+def test_decide_many_with_jev_answers_both_questions_from_one_response(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    route = _question(tmp_path)
+    scope = _noul_question(tmp_path)
+    combined_response = {
+        "answers": {
+            "a.question": DOCUMENTED_RESPONSE["answers"]["a.question"],
+            "a.scope": NOUL_RESPONSE_HIGH["answers"]["a.scope"],
+        },
+        "usage": {"cost": 0.00002},
+    }
+    calls = []
+
+    def _post(_body: dict, _key: str, timeout: float) -> dict:
+        calls.append(_body)
+        return combined_response
+
+    monkeypatch.setattr(decide, "_post", _post)
+    outcomes = decide.decide_many(
+        [
+            (route, {"phase": "apply", "task": "x"}),
+            (scope, {"task_text": "x", "changed_paths": ""}),
+        ],
+        "jev",
+        api_key="k",
+    )
+    assert len(calls) == 1, "one request answered both questions"
+    assert outcomes[0]["decision"] == "payments"
+    assert outcomes[1]["decision"] == "true"
+
+
+def test_decide_many_degrades_every_question_together_on_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    route = _question(tmp_path)
+    scope = _noul_question(tmp_path)
+
+    def _post(_body: dict, _key: str, timeout: float) -> dict:
+        raise urllib.error.HTTPError("url", 401, "unauthorized", {}, None)
+
+    monkeypatch.setattr(decide, "_post", _post)
+    outcomes = decide.decide_many(
+        [
+            (route, {"phase": "apply", "task": "x"}),
+            (scope, {"task_text": "x", "changed_paths": ""}),
+        ],
+        "jev",
+        api_key="k",
+    )
+    assert all(outcome["resolved"] is False and outcome["reason"] == "HTTP 401" for outcome in outcomes)
+
+
+def test_decide_is_a_one_question_call_through_decide_many(tmp_path: Path) -> None:
+    question = _question(tmp_path)
+    outcome = decide.decide(question, {"phase": "explore", "task": "an idea"}, "mock")
+    assert outcome["resolved"] is False
+    assert outcome["reason"] == "mock_backend"
 
 
 # --- the journal -----------------------------------------------------------------------

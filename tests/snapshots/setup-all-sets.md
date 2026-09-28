@@ -103,7 +103,7 @@
   },
   "format": 1,
   "paths": {
-    ".harnex/rules.md": "18cc7c2dd279ae118969e56b405df2c97f285708f03c97ad5acc70d687d1c66c",
+    ".harnex/rules.md": "4d7108c6fbab5259154794e5fcbeacd4b20ea5a8978d1603e1cf4a317fc6dc18",
     ".harnex/state/.gitignore": "ff73664601b6084ee71a6c73e1e9e27f039c023bf6fce320496df7614f8b8365"
   }
 }
@@ -154,8 +154,11 @@ unreviewed, untested against its own intent, and hides inside a diff the reviewe
 reading for something else. When you find something worth fixing, name it in the report
 and leave it; it becomes the next task or the next change.
 
-**Enforced by:** the scope question of pillar 3, asked of the decision model with the
-task's text and the paths that changed.
+**Enforced by:** `plugin/feedback/task_scope_check.py` (pillar 5), run by `apply`'s loop
+after every builder writes — `check_declared` against a task's own declared paths, or, for
+a task that declares none, the `task.scope` question put to the decision model with the
+task's text and the changed paths. `check_protected` runs unconditionally alongside
+either one: no task's own scope, declared or judged, can widen past it.
 
 ### Put a test where the thing it tests lives, following the layout already in the project
 
@@ -269,6 +272,12 @@ difference bites.
 A task list that is ticked by whoever did the work records an intention, not an outcome.
 Ticking is the orchestrator's act, taken after the check has passed and the evidence has
 been read. Report what you did and what the check said, and leave the list alone.
+
+**Enforced by:** `plugin/scripts/apply_loop.py` (pillar 3's script, the enforcement pillar
+5's `task_scope_check.py` names its own protected-path check against) — `tasks.md` sits
+under `openspec/`, so a builder's own attempt to tick it is caught the same way any other
+write to a protected path is, and ticking itself happens only in the loop's own `tick`
+step, which no builder binding ever calls.
 
 ### Treat the proposal as the boundary of the change, and widen it by revising it, never in passing
 

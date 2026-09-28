@@ -25,15 +25,24 @@ The nervous system: who does what, in which order, and who decides.
 
 ## What is here
 
-- `../scripts/decide.py` — the decision interface and its `mock`/`jev` backends. Kept in
-  `scripts/`, where every harness script lives and where `uv run` expects it, not inside
-  this directory — the same reason `../tools/README.md` names `setup.py` the same way.
+- `../scripts/decide.py` — the decision interface and its `mock`/`jev` backends, and
+  `decide_many()` (`C3`) for asking several questions in one call. Kept in `scripts/`,
+  where every harness script lives and where `uv run` expects it, not inside this
+  directory — the same reason `../tools/README.md` names `setup.py` the same way.
+- `../scripts/apply_loop.py` — the apply loop's own filesystem and process steps (`C3`),
+  kept in `scripts/` for the same reason.
 - `../agents/verifier.md` — the verifier's Claude Code adapter, binding the role prompt
-  under `roles/verifier.md`. `C3`'s `builder` adds a second adapter the same way.
+  under `roles/verifier.md`.
+- `../agents/builder.md` — the builder's Claude Code adapter (`C3`), binding
+  `roles/builder.md`; the Codex binding is reached through its own plugin, not adapted
+  here.
 
 ## Filled by
 
 `C2` — **delivered**: the workflow, the `verifier` role prompt and its adapter, the
 `phase.route` question, the decision client, and the advice line it prints on screen
-before anything runs. Next: `C3` adds the `builder` role and `task.route`; `C4` adds
-`guard.risk` in pillar 4, not here.
+before anything runs.
+
+`C3` — **delivered**: the `builder` role and its two bindings, `task.route` and
+`task.scope`, `decide_many()`, and `apply_loop.py`. Next: `C4` adds `guard.risk` in
+pillar 4, not here.

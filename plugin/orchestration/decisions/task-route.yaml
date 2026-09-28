@@ -1,0 +1,22 @@
+id: task.route
+type: choice
+state_fields: task_text, paths
+option.codex: Delegate to Codex through its plugin — well-scoped, tests already named.
+option.claude: A Claude subagent, the fallback binding — the default when Codex is unreachable or the task is ambiguous.
+option.human: Ask the person — a judgement only they can make.
+rule_threshold: 0.70
+---
+
+# Which builder binding should carry out this task?
+
+`apply` binds this decision: below 0.70 it asks you rather than picking on its own. Both
+bindings — Codex and the Claude fallback subagent — are held to the same write and tick
+boundary (`builder-role`), so routing changes only who writes the diff, never what a task
+is allowed to touch.
+
+**State:** `task_text` (the task's own text, from `tasks.md`), `paths` (the task's own
+declared paths, newline-joined, or an empty string when it declares none — never a JSON
+list; `decide.py`'s state validation refuses one).
+
+**Rule:** the option with the highest probability, if that probability is at least 0.70;
+otherwise ask the person which one they want.

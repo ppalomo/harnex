@@ -45,7 +45,10 @@ TOTAL_BUDGET_SECONDS = 3.0
 RETRIABLE_STATUSES = frozenset({500, 502, 503, 524, 529})
 BACKENDS = frozenset({"mock", "jev"})
 QUESTION_TYPES = frozenset({"choice", "noul", "score"})
-QUESTION_FIELDS = frozenset({"id", "type", "state_fields", "rule_threshold"})
+REQUIRED_QUESTION_FIELDS = frozenset({"id", "type", "state_fields", "rule_threshold"})
+OPTIONAL_QUESTION_FIELDS = frozenset({"rule_threshold_low"})
+QUESTION_FIELDS = REQUIRED_QUESTION_FIELDS | OPTIONAL_QUESTION_FIELDS
+NOUL_OPTIONS = frozenset({"true", "false"})
 
 _DELIMITER = "---"
 _FIELD = re.compile(r"^([a-z][a-z_.\-]*): *(\S.*?) *$")
@@ -65,6 +68,7 @@ class Question:
     state_fields: tuple[str, ...]
     options: dict[str, str]
     rule_threshold: float
+    rule_threshold_low: float | None
     instructions: str
     path: Path
 
@@ -104,7 +108,7 @@ def parse_question(text: str, path: Path) -> Question:
             raise DecisionError(f"{path}:{offset}: `{key}` is declared twice")
         fields[key] = value
 
-    missing = sorted(QUESTION_FIELDS - set(fields))
+    missing = sorted(REQUIRED_QUESTION_FIELDS - set(fields))
     if missing:
         raise DecisionError(f"{path}: declares no {', '.join(missing)}")
     unknown = sorted(set(fields) - QUESTION_FIELDS)
@@ -123,6 +127,11 @@ def parse_question(text: str, path: Path) -> Question:
         )
     if fields["type"] == "choice" and not options:
         raise DecisionError(f"{path}: a choice question declares no `option.*`")
+    if fields["type"] == "noul" and set(options) != NOUL_OPTIONS:
+        raise DecisionError(
+            f"{path}: a noul question must declare exactly `option.true` and "
+            f"`option.false`, not {sorted(options) or 'none'}"
+        )
 
     try:
         threshold = float(fields["rule_threshold"])
@@ -132,6 +141,29 @@ def parse_question(text: str, path: Path) -> Question:
         ) from None
     if not 0.0 <= threshold <= 1.0:
         raise DecisionError(f"{path}: rule_threshold must be between 0 and 1")
+
+    threshold_low: float | None = None
+    if fields["type"] == "noul":
+        if "rule_threshold_low" not in fields:
+            raise DecisionError(
+                f"{path}: declares no rule_threshold_low, required for a noul question"
+            )
+        try:
+            threshold_low = float(fields["rule_threshold_low"])
+        except ValueError:
+            raise DecisionError(
+                f"{path}: rule_threshold_low `{fields['rule_threshold_low']}` is not a number"
+            ) from None
+        if not 0.0 <= threshold_low <= 1.0:
+            raise DecisionError(f"{path}: rule_threshold_low must be between 0 and 1")
+        if threshold_low >= threshold:
+            raise DecisionError(
+                f"{path}: rule_threshold_low must be below rule_threshold"
+            )
+    elif "rule_threshold_low" in fields:
+        raise DecisionError(
+            f"{path}: declares rule_threshold_low, which only a noul question may declare"
+        )
 
     state_fields = tuple(
         part.strip() for part in fields["state_fields"].split(",") if part.strip()
@@ -145,6 +177,7 @@ def parse_question(text: str, path: Path) -> Question:
         state_fields=state_fields,
         options=options,
         rule_threshold=threshold,
+        rule_threshold_low=threshold_low,
         instructions=instructions,
         path=path,
     )
@@ -194,7 +227,7 @@ def _unresolved(
 
 
 def _format_prompt(question: Question) -> str:
-    if question.type != "choice":
+    if not question.options:
         return question.instructions
     options = "\n".join(f"- {name}: {text}" for name, text in question.options.items())
     return f"{question.instructions}\n{options}"
@@ -215,54 +248,112 @@ def _validate_state(state: dict[str, object]) -> None:
             )
 
 
+def _question_payload(question: Question) -> dict[str, object]:
+    if question.type in ("choice", "noul"):
+        return {
+            "type": question.type,
+            "instructions": question.instructions,
+            "criteria": dict(question.options),
+        }
+    raise DecisionError(
+        f"decide.py does not yet build a request for type `{question.type}`"
+    )
+
+
 def build_request(question: Question, state: dict[str, object]) -> dict[str, object]:
-    _validate_state(state)
-    if question.type != "choice":
-        raise DecisionError(
-            f"decide.py does not yet build a request for type `{question.type}`"
-        )
+    """One question, kept for callers and tests that only ever ask one at a time."""
+    return build_batch_request([(question, state)])
+
+
+def build_batch_request(
+    items: list[tuple[Question, dict[str, object]]]
+) -> dict[str, object]:
+    """Several distinct questions, one shared state object, one request."""
+    ids = [question.id for question, _ in items]
+    if len(set(ids)) != len(ids):
+        raise DecisionError("decide_many: question ids must be distinct within one call")
+
+    combined_state: dict[str, object] = {}
+    for _, state in items:
+        _validate_state(state)
+        for key, value in state.items():
+            if key in combined_state and combined_state[key] != value:
+                raise DecisionError(
+                    f"decide_many: conflicting values for shared state field `{key}`"
+                )
+            combined_state[key] = value
+
     return {
         "model": MODEL_ID,
-        "state": state,
-        "questions": {
-            question.id: {
-                "type": "choice",
-                "instructions": question.instructions,
-                "criteria": dict(question.options),
-            }
-        },
+        "state": combined_state,
+        "questions": {question.id: _question_payload(question) for question, _ in items},
     }
 
 
 def parse_response(question: Question, response: dict[str, object]) -> dict[str, object]:
     answer = response["answers"][question.id]  # type: ignore[index]
-    if answer["type"] != "choice":
+    if answer["type"] != question.type:
         raise DecisionError(
-            f"expected a choice answer for `{question.id}`, got `{answer['type']}`"
+            f"expected a {question.type} answer for `{question.id}`, got `{answer['type']}`"
         )
-    probabilities = answer["probabilities"]
-    confidence = answer["confidence"]
-    choice = answer["choice"]
     cost_usd = response.get("usage", {}).get("cost")  # type: ignore[union-attr]
-    top_probability = probabilities.get(choice, 0.0)
 
-    if top_probability >= question.rule_threshold:
-        return {
-            "resolved": True,
-            "decision": choice,
-            "probabilities": probabilities,
-            "confidence": confidence,
-            "backend": "jev",
-            "cost_usd": cost_usd,
-        }
-    return _unresolved(
-        question,
-        backend="jev",
-        reason="below_threshold",
-        probabilities=probabilities,
-        confidence=confidence,
-        cost_usd=cost_usd,
-    )
+    if question.type == "choice":
+        probabilities = answer["probabilities"]
+        confidence = answer["confidence"]
+        choice = answer["choice"]
+        top_probability = probabilities.get(choice, 0.0)
+        if top_probability >= question.rule_threshold:
+            return {
+                "resolved": True,
+                "decision": choice,
+                "probabilities": probabilities,
+                "confidence": confidence,
+                "backend": "jev",
+                "cost_usd": cost_usd,
+            }
+        return _unresolved(
+            question,
+            backend="jev",
+            reason="below_threshold",
+            probabilities=probabilities,
+            confidence=confidence,
+            cost_usd=cost_usd,
+        )
+
+    if question.type == "noul":
+        probability = answer["noul"]
+        if not isinstance(probability, (int, float)):
+            raise DecisionError(f"noul answer for `{question.id}` is not a number")
+        probabilities = {"true": probability, "false": 1.0 - probability}
+        if probability >= question.rule_threshold:
+            return {
+                "resolved": True,
+                "decision": "true",
+                "probabilities": probabilities,
+                "confidence": probability,
+                "backend": "jev",
+                "cost_usd": cost_usd,
+            }
+        if probability <= question.rule_threshold_low:  # type: ignore[operator]
+            return {
+                "resolved": True,
+                "decision": "false",
+                "probabilities": probabilities,
+                "confidence": 1.0 - probability,
+                "backend": "jev",
+                "cost_usd": cost_usd,
+            }
+        return _unresolved(
+            question,
+            backend="jev",
+            reason="between_thresholds",
+            probabilities=probabilities,
+            confidence=max(probability, 1.0 - probability),
+            cost_usd=cost_usd,
+        )
+
+    raise DecisionError(f"decide.py does not yet parse a response for type `{question.type}`")
 
 
 def _post(body: dict[str, object], api_key: str, timeout: float) -> dict[str, object]:
@@ -280,22 +371,29 @@ def _post(body: dict[str, object], api_key: str, timeout: float) -> dict[str, ob
         return json.loads(response.read().decode("utf-8"))
 
 
-def call_jev(
-    question: Question,
-    state: dict[str, object],
+def call_jev_many(
+    items: list[tuple[Question, dict[str, object]]],
     api_key: str | None,
     *,
     total_budget: float = TOTAL_BUDGET_SECONDS,
-) -> dict[str, object]:
-    """One request, one retry on a network error or a retriable status, both tries
-    together bounded by `total_budget` — never left to the network's own timeout."""
+) -> list[dict[str, object]]:
+    """One request for every distinct question, one retry on a network error or a
+    retriable status, both tries together bounded by `total_budget` — never left to the
+    network's own timeout. A failure at any stage degrades every question in the call to
+    the same unresolved shape a lone `decide()` call would have returned for it."""
+    questions = [question for question, _ in items]
     if not api_key:
-        return _unresolved(question, backend="jev", reason="OPENROUTER_API_KEY not set")
+        return [
+            _unresolved(question, backend="jev", reason="OPENROUTER_API_KEY not set")
+            for question in questions
+        ]
 
     try:
-        body = build_request(question, state)
+        body = build_batch_request(items)
     except DecisionError as error:
-        return _unresolved(question, backend="jev", reason=str(error))
+        return [
+            _unresolved(question, backend="jev", reason=str(error)) for question in questions
+        ]
 
     deadline = time.monotonic() + total_budget
     last_reason = "unreachable"
@@ -310,18 +408,54 @@ def call_jev(
             if attempt == 0 and error.code in RETRIABLE_STATUSES:
                 last_reason = f"HTTP {error.code}, retrying"
                 continue
-            return _unresolved(question, backend="jev", reason=f"HTTP {error.code}")
+            return [
+                _unresolved(question, backend="jev", reason=f"HTTP {error.code}")
+                for question in questions
+            ]
         except (urllib.error.URLError, TimeoutError, OSError) as error:
             last_reason = f"unreachable: {error}"
             if attempt == 0:
                 continue
-            return _unresolved(question, backend="jev", reason=last_reason)
+            return [
+                _unresolved(question, backend="jev", reason=last_reason)
+                for question in questions
+            ]
         try:
-            return parse_response(question, response)
+            return [parse_response(question, response) for question in questions]
         except (KeyError, TypeError, DecisionError) as error:
-            return _unresolved(question, backend="jev", reason=f"malformed response: {error}")
+            return [
+                _unresolved(question, backend="jev", reason=f"malformed response: {error}")
+                for question in questions
+            ]
 
-    return _unresolved(question, backend="jev", reason=last_reason)
+    return [
+        _unresolved(question, backend="jev", reason=last_reason) for question in questions
+    ]
+
+
+def call_jev(
+    question: Question,
+    state: dict[str, object],
+    api_key: str | None,
+    *,
+    total_budget: float = TOTAL_BUDGET_SECONDS,
+) -> dict[str, object]:
+    """One question, kept for callers and tests that only ever ask one at a time."""
+    return call_jev_many([(question, state)], api_key, total_budget=total_budget)[0]
+
+
+def decide_many(
+    items: list[tuple[Question, dict[str, object]]],
+    backend: str,
+    *,
+    api_key: str | None = None,
+    total_budget: float = TOTAL_BUDGET_SECONDS,
+) -> list[dict[str, object]]:
+    if backend == "mock":
+        return [mock_answer(question) for question, _ in items]
+    if backend == "jev":
+        return call_jev_many(items, api_key, total_budget=total_budget)
+    raise DecisionError(f"unknown backend `{backend}`; the backends are {', '.join(sorted(BACKENDS))}")
 
 
 def decide(
@@ -331,11 +465,7 @@ def decide(
     *,
     api_key: str | None = None,
 ) -> dict[str, object]:
-    if backend == "mock":
-        return mock_answer(question)
-    if backend == "jev":
-        return call_jev(question, state, api_key)
-    raise DecisionError(f"unknown backend `{backend}`; the backends are {', '.join(sorted(BACKENDS))}")
+    return decide_many([(question, state)], backend, api_key=api_key)[0]
 
 
 # --- the journal -------------------------------------------------------------------
