@@ -10,6 +10,8 @@ allow, with no exception carved out by a more specific allow.
 """
 
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -20,8 +22,53 @@ from conftest import tree
 GUARD = "guard"
 
 
+def _generate_floor(plugin_root: Path, patterns: Path, output: Path) -> None:
+    """Run the maintainer generator with explicit paths, leaving committed files alone."""
+    finished = subprocess.run(
+        [
+            sys.executable,
+            str(plugin_root / "control" / "guard" / "generate_floor.py"),
+            "--patterns",
+            str(patterns),
+            "--output",
+            str(output),
+        ],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert finished.returncode == 0, finished.stderr
+
+
 def _floor(plugin_root: Path) -> dict:
     return json.loads((plugin_root / "control" / "floor.json").read_text(encoding="utf-8"))
+
+
+def test_the_committed_floor_is_the_generator_s_exact_output(
+    plugin_root: Path, tmp_path: Path
+) -> None:
+    generated = tmp_path / "floor.json"
+    _generate_floor(plugin_root, plugin_root / "control" / "guard" / "patterns.yaml", generated)
+    assert generated.read_bytes() == (plugin_root / "control" / "floor.json").read_bytes()
+
+
+def test_floor_regeneration_detects_an_uncommitted_pattern_change(
+    plugin_root: Path, tmp_path: Path
+) -> None:
+    patterns = tmp_path / "patterns.yaml"
+    patterns.write_bytes((plugin_root / "control" / "guard" / "patterns.yaml").read_bytes())
+    patterns.write_text(
+        patterns.read_text(encoding="utf-8").rstrip("\n")
+        + '\n- rule: commits-only-when-shipping\n'
+        + '  list: ask\n'
+        + '  pattern: "Bash(git tag *)"\n'
+        + '  floor: "yes"\n',
+        encoding="utf-8",
+    )
+
+    generated = tmp_path / "floor.json"
+    _generate_floor(plugin_root, patterns, generated)
+    assert generated.read_bytes() != (plugin_root / "control" / "floor.json").read_bytes()
 
 
 def _guard_enforced_rules(rules_dir: Path) -> list[str]:

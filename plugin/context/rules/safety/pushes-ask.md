@@ -13,4 +13,4 @@ draft, and none of that can be taken back by deleting the branch afterwards.
 
 **Enforced by:** the permission floor of pillar 4, which asks before any command it can
 name that writes to a remote, even when nothing of the harness is running; and the shell
-guard of the same pillar, which classifies the rest.
+guard of the same pillar (`control/guard/guard.py`), which classifies the rest.

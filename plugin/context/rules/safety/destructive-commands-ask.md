@@ -14,6 +14,6 @@ front of them, not a description of it.
 
 **Enforced by:** the permission floor of pillar 4, which asks before the commands it can
 name, including inside a pipeline or a subshell, even when nothing of the harness is
-running; and the shell guard of the same pillar, which classifies every command before
+running; and the shell guard of the same pillar (`control/guard/guard.py`), which classifies every command before
 it runs and asks whenever it is not certain — the only layer that sees a command reached
 through a wrapper or an absolute path.

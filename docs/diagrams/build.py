@@ -365,8 +365,8 @@ def guard() -> None:
     cmd = c.box(40, 130, 220, 60, "agent wants to run\na shell command", bg=ORCH, size=14)
     parse = c.box(320, 130, 220, 60, "parse: split on ; && || |\nunparseable → ambiguous", bg=WHITE, size=12)
     allow = c.box(600, 130, 220, 60, "every part in the\nread-only allowlist?", bg=FEEDBACK, size=12)
-    deny = c.box(600, 230, 220, 60, "matches a deny pattern?\nrm -rf outside cwd, force push,\nreset --hard, sudo, curl | sh", bg=CONTROL, size=11)
-    ask = c.box(600, 330, 220, 60, "matches an ask pattern?\nrm in cwd, git push,\nrebase, docker, kubectl", bg=CONTROL, size=11)
+    deny = c.box(600, 230, 220, 60, "matches a deny pattern?\n(none today — every Bash rule\nresolves to ask, not deny)", bg=CONTROL, size=11)
+    ask = c.box(600, 330, 220, 60, "matches an ask pattern?\nrm, git push, rebase, commit,\nsudo, reset --hard, docker*", bg=CONTROL, size=11)
     dm = c.box(600, 430, 220, 70, "decision model: guard.risk\nstate = command, cwd, branch\ntimeout 3 s, one retry", bg=ACTOR, size=11)
 
     o_allow = c.box(900, 130, 200, 60, "ALLOW\n(no journal)", bg=TOOLS, size=14)
@@ -374,6 +374,7 @@ def guard() -> None:
     o_ask = c.box(900, 330, 200, 60, "ASK YOU\n(journal)", bg=ORCH, size=14)
     o_dm = c.box(900, 430, 200, 70, "P(destructive) ≥ 0.30 → ask\nP(read_only) ≥ 0.85 → allow\nelse → ask", bg=WHITE, size=11)
     o_fail = c.box(900, 530, 200, 60, "unreachable / no key /\nbackend off → ASK", bg=ORCH, size=12)
+    o_err = c.box(900, 610, 200, 60, "exception while parsing\nor matching → ASK\n(journalled: internal_error)", bg=ORCH, size=11)
 
     c.arrow(cmd, parse, "rl")
     c.arrow(parse, allow, "rl")
@@ -385,9 +386,12 @@ def guard() -> None:
     c.arrow(ask, dm, "bt", "no (residue)")
     c.arrow(dm, o_dm, "rl")
     c.arrow(dm, o_fail, "rl", dashed=True, via=[(860, 500), (860, 560)])
+    c.arrow(parse, o_err, "rl", dashed=True, via=[(430, 610)])
 
     c.label(40, 230, "Why this order:\n• a regex on 'rm -rf' is more reliable than\n  any model and costs nothing\n• DENY never comes from the model alone\n• the script never allows on its own error → ASK\n• if the hook itself fails, Claude Code falls\n  back to its permissions: the floor in\n  settings.json still denies or asks\n• rules with enforced_by: guard feed the\n  three pattern lists", size=14)
+    c.label(40, 400, "* docker: illustrative of where the ask list may grow later (§11) — no rule asks\n  for it yet, so v1's patterns.yaml does not carry it. The deny box is empty for\n  the same reason: no rule states deny severity for a Bash command yet.", size=13)
     c.label(40, 470, "Codex side: the codex plugin runs Codex under\nits own sandbox. A Codex hook with the same\nscript is a later feature.", size=14)
+    c.label(40, 610, "An exception anywhere in splitting, tokenizing or\nmatching (not the decision-model call, which fails\ninto the box above) also resolves to ASK, never allow.", size=14)
     c.save("05-guard")
 
 

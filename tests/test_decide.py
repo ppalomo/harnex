@@ -96,6 +96,178 @@ def test_a_choice_question_cannot_declare_rule_threshold_low(tmp_path: Path) -> 
         decide.parse_question(text, tmp_path / "a-question.yaml")
 
 
+# --- the score type ---------------------------------------------------------------------
+
+SCORE_QUESTION = """\
+id: a.score
+type: score
+state_fields: command
+option.destructive: The command may cause destructive changes.
+option.read_only: The command only reads state.
+option.reversible: The command makes reversible changes.
+rule_threshold.destructive: 0.30
+rule_threshold.read_only: 0.85
+---
+
+# What risk does this command carry?
+"""
+
+
+def _score_question(tmp_path: Path, text: str = SCORE_QUESTION) -> decide.Question:
+    directory = _seed(tmp_path, text, name="a-score.yaml")
+    return decide.load_question("a.score", directory)
+
+
+def test_a_good_score_question_parses_with_per_option_thresholds(tmp_path: Path) -> None:
+    question = _score_question(tmp_path)
+    assert question.type == "score"
+    assert question.option_thresholds == {"destructive": 0.30, "read_only": 0.85}
+
+
+def test_score_build_request_includes_every_option_as_criteria(tmp_path: Path) -> None:
+    question = _score_question(tmp_path)
+    state = {"command": "git status"}
+    request = decide.build_request(question, state)
+    assert request == {
+        "model": "typesafe/jev-1.13",
+        "state": state,
+        "questions": {
+            "a.score": {
+                "type": "score",
+                "instructions": "What risk does this command carry?",
+                "criteria": {
+                    "destructive": "The command may cause destructive changes.",
+                    "read_only": "The command only reads state.",
+                    "reversible": "The command makes reversible changes.",
+                },
+            }
+        },
+    }
+
+
+def test_a_score_question_needs_a_per_option_threshold(tmp_path: Path) -> None:
+    text = "\n".join(
+        line for line in SCORE_QUESTION.splitlines() if not line.startswith("rule_threshold.")
+    )
+    with pytest.raises(
+        decide.DecisionError, match=r"a-score\.yaml.*rule_threshold\."
+    ):
+        decide.parse_question(text, tmp_path / "a-score.yaml")
+
+
+@pytest.mark.parametrize(
+    ("flat_field", "expected"),
+    [
+        ("rule_threshold: 0.70", "rule_threshold"),
+        ("rule_threshold_low: 0.30", "rule_threshold_low"),
+    ],
+)
+def test_a_score_question_forbids_flat_threshold_fields(
+    tmp_path: Path, flat_field: str, expected: str
+) -> None:
+    text = SCORE_QUESTION.replace("---", f"{flat_field}\n---")
+    with pytest.raises(
+        decide.DecisionError, match=rf"a-score\.yaml.*{expected}"
+    ):
+        decide.parse_question(text, tmp_path / "a-score.yaml")
+
+
+SCORE_RESPONSE = {
+    "answers": {
+        "a.score": {
+            "type": "score",
+            "score": 0.0,
+            "probabilities": {
+                "destructive": 0.20,
+                "read_only": 0.86,
+                "reversible": 0.90,
+            },
+            "confidence": 0.86,
+        }
+    },
+    "usage": {"cost": 0.00001},
+}
+
+
+def test_score_one_option_crossing_its_threshold_resolves(tmp_path: Path) -> None:
+    question = _score_question(tmp_path)
+    outcome = decide.parse_response(question, SCORE_RESPONSE)
+    assert outcome == {
+        "resolved": True,
+        "decision": "read_only",
+        "probabilities": {
+            "destructive": 0.20,
+            "read_only": 0.86,
+            "reversible": 0.90,
+        },
+        "confidence": 0.86,
+        "backend": "jev",
+        "cost_usd": 0.00001,
+    }
+
+
+def test_score_two_options_crossing_resolves_the_earliest_declared(tmp_path: Path) -> None:
+    question = _score_question(tmp_path)
+    response = {
+        "answers": {
+            "a.score": {
+                "type": "score",
+                "score": 0.0,
+                "probabilities": {
+                    "destructive": 0.31,
+                    "read_only": 0.99,
+                    "reversible": 0.90,
+                },
+                "confidence": 0.99,
+            }
+        },
+        "usage": {"cost": 0.00001},
+    }
+    outcome = decide.parse_response(question, response)
+    assert outcome["resolved"] is True
+    assert outcome["decision"] == "destructive"
+    assert outcome["probabilities"] == response["answers"]["a.score"]["probabilities"]
+
+
+def test_score_with_no_option_crossing_is_unresolved(tmp_path: Path) -> None:
+    question = _score_question(tmp_path)
+    response = {
+        "answers": {
+            "a.score": {
+                "type": "score",
+                "score": 0.0,
+                "probabilities": {
+                    "destructive": 0.29,
+                    "read_only": 0.84,
+                    "reversible": 0.99,
+                },
+                "confidence": 0.99,
+            }
+        },
+        "usage": {"cost": 0.00001},
+    }
+    outcome = decide.parse_response(question, response)
+    assert outcome["resolved"] is False
+    assert outcome["reason"] == "below_threshold"
+    assert outcome["probabilities"] == response["answers"]["a.score"]["probabilities"]
+    assert "What risk does this command carry?" in outcome["prompt"]
+
+
+def test_score_mock_backend_returns_the_generic_unresolved_outcome(tmp_path: Path) -> None:
+    question = _score_question(tmp_path)
+    outcome = decide.decide(question, {"command": "git status"}, "mock")
+    assert outcome == {
+        "resolved": False,
+        "backend": "mock",
+        "reason": "mock_backend",
+        "prompt": outcome["prompt"],
+        "probabilities": None,
+        "confidence": None,
+        "cost_usd": None,
+    }
+    assert "What risk does this command carry?" in outcome["prompt"]
+
+
 # --- the noul type ----------------------------------------------------------------------
 
 NOUL_QUESTION = """\
