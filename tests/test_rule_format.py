@@ -199,7 +199,7 @@ def _hooked_scripts(hooks_path: Path) -> set[str]:
 
 
 def _enforcer_script(rule: render_rules.Rule) -> str | None:
-    """The script path an `enforced_by: hook` rule names in its body, if any."""
+    """The script path an `enforced_by: hook` or `guard` rule names in its body, if any."""
     match = _ENFORCER_SCRIPT_PATH.search(rule.reason)
     return match.group(1) if match else None
 
@@ -210,7 +210,7 @@ def _check_hook_walk(rule_files: list[Path], hooks_path: Path) -> None:
     named: set[str] = set()
     for path in rule_files:
         rule = _rule(path)
-        if rule.enforced_by != "hook":
+        if rule.enforced_by not in ("hook", "guard"):
             continue
         script = _enforcer_script(rule)
         assert script, f"{path}: declares enforced_by hook but names no script by path"

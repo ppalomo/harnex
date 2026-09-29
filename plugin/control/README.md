@@ -39,13 +39,18 @@ human. Two layers, because one hook cannot promise what it cannot deliver.
 - **The floor is coarser than the guard.** It matches commands as they are written. It
   does see a subcommand inside a pipeline, a subshell or a command substitution; it does
   not see a command reached through a wrapper, an environment runner or an absolute path
-  it does not name, and it cannot tell a deletion inside the task's declared paths from
-  one outside them. Those gaps are recorded, not assumed away.
+  it does not name — such a command instead falls to the session's own generic permission
+  flow, with none of the harness's own reasoning behind it, where the guard's own residue
+  path still asks the decision model about it specifically. Neither layer knows a task's
+  own declared paths — that is pillar 5's own check, after a builder has already written,
+  not something either layer decides before a command runs. Those gaps are recorded, not
+  assumed away.
 - **One thing defeats both**: a permission mode that bypasses permissions altogether. No
   harness can defend against it, and setup says so rather than claiming otherwise.
 
 ## Filled by
 
-`C1c` — the permission floor and its merge into a project. Then `C4` — the guard script,
-its pattern lists, the hook that runs it before a shell command, and the risk question;
+`C1c` — the permission floor and its merge into a project. `C4` — the guard script, its
+pattern lists, the hook that runs it before a shell command, and the risk question;
 `C4` also regenerates this floor from the same patterns, so the two layers cannot drift.
+Both delivered.

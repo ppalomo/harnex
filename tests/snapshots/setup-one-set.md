@@ -103,7 +103,7 @@
   },
   "format": 1,
   "paths": {
-    ".harnex/rules.md": "32b59a22d62506f16a5fea9b97afe50a030ff5bd4f471517a289ab939968a057",
+    ".harnex/rules.md": "12dcc74d4a352ad965648359a5d0c3810dce494583bf678769977c8c43a14d29",
     ".harnex/state/.gitignore": "ff73664601b6084ee71a6c73e1e9e27f039c023bf6fce320496df7614f8b8365"
   }
 }
@@ -138,8 +138,9 @@ being asked takes a decision that belongs to the person. Build, check, report â€
 
 **Enforced by:** the permission floor of pillar 4, which asks the person before a
 command that writes to the history, even when nothing of the harness is running; and the
-shell guard of the same pillar, which is what can tell the shipping phase from any
-other.
+shell guard of the same pillar (`control/guard/guard.py`), which asks before every commit
+alike, in any phase â€” it has no notion of which phase is running, so it is the person's
+own yes, prompted by that same ask, that tells the shipping phase from any other.
 
 ### Write commit messages in the conventional form, in English, saying what changed and why
 

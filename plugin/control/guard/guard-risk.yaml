@@ -1,0 +1,25 @@
+id: guard.risk
+type: score
+state_fields: command, cwd, branch, is_worktree
+option.destructive: The command may irreversibly delete, overwrite, publish, or otherwise damage state.
+option.read_only: The command only observes state and does not change it.
+option.reversible: The command changes state but can be safely undone.
+rule_threshold.destructive: 0.30
+rule_threshold.read_only: 0.85
+---
+
+# What risk does this shell command carry?
+
+`guard.py` asks this only for command residue that its deterministic read-only, deny, and
+ask patterns do not classify. The model judges risk; the guard maps a resolved `read_only`
+answer to allow and every other result to ask the person.
+
+**State:** `command` (the command to classify), `cwd` (the current working directory),
+`branch` (the current branch), `is_worktree` (whether the current directory is a Git
+worktree).
+
+**Rule:** `destructive` is declared before `read_only`, so a command that scores at or
+above both thresholds resolves to `destructive` — erring toward a question over a silent
+allow. `reversible` has no threshold and therefore cannot resolve on its own; it remains
+an ask outcome alongside an unresolved result. Otherwise, `destructive` at or above 0.30
+asks; `read_only` at or above 0.85 allows; every other result asks the person.

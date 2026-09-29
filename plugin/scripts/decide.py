@@ -33,7 +33,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -45,8 +45,8 @@ TOTAL_BUDGET_SECONDS = 3.0
 RETRIABLE_STATUSES = frozenset({500, 502, 503, 524, 529})
 BACKENDS = frozenset({"mock", "jev"})
 QUESTION_TYPES = frozenset({"choice", "noul", "score"})
-REQUIRED_QUESTION_FIELDS = frozenset({"id", "type", "state_fields", "rule_threshold"})
-OPTIONAL_QUESTION_FIELDS = frozenset({"rule_threshold_low"})
+REQUIRED_QUESTION_FIELDS = frozenset({"id", "type", "state_fields"})
+OPTIONAL_QUESTION_FIELDS = frozenset({"rule_threshold", "rule_threshold_low"})
 QUESTION_FIELDS = REQUIRED_QUESTION_FIELDS | OPTIONAL_QUESTION_FIELDS
 NOUL_OPTIONS = frozenset({"true", "false"})
 
@@ -67,10 +67,11 @@ class Question:
     type: str
     state_fields: tuple[str, ...]
     options: dict[str, str]
-    rule_threshold: float
+    rule_threshold: float | None
     rule_threshold_low: float | None
     instructions: str
     path: Path
+    option_thresholds: dict[str, float] = field(default_factory=dict)
 
 
 # --- reading a question file ---------------------------------------------------------
@@ -79,8 +80,9 @@ class Question:
 def parse_question(text: str, path: Path) -> Question:
     """The format is flat `key: value` fields, a bare `---`, then a prose body — one
     delimiter, not a rule's two, since there is nothing before the fields to close off.
-    One convention beyond a rule's: `option.<name>` keys collect into a map instead of
-    staying literal. Nothing else nests."""
+    Two conventions beyond a rule's: `option.<name>` and
+    `rule_threshold.<option-name>` keys collect into maps instead of staying literal.
+    Nothing else nests."""
     lines = text.split("\n")
     try:
         end = lines.index(_DELIMITER)
@@ -89,6 +91,7 @@ def parse_question(text: str, path: Path) -> Question:
 
     fields: dict[str, str] = {}
     options: dict[str, str] = {}
+    option_threshold_values: dict[str, str] = {}
     for offset, line in enumerate(lines[:end], start=1):
         if not line.strip():
             raise DecisionError(f"{path}:{offset}: blank line inside the frontmatter")
@@ -103,6 +106,16 @@ def parse_question(text: str, path: Path) -> Question:
             if name in options:
                 raise DecisionError(f"{path}:{offset}: option `{name}` is declared twice")
             options[name] = value
+            continue
+        if key.startswith("rule_threshold."):
+            name = key[len("rule_threshold.") :]
+            if not name:
+                raise DecisionError(f"{path}:{offset}: `rule_threshold.` names no option")
+            if name in option_threshold_values:
+                raise DecisionError(
+                    f"{path}:{offset}: rule threshold for option `{name}` is declared twice"
+                )
+            option_threshold_values[name] = value
             continue
         if key in fields:
             raise DecisionError(f"{path}:{offset}: `{key}` is declared twice")
@@ -133,14 +146,33 @@ def parse_question(text: str, path: Path) -> Question:
             f"`option.false`, not {sorted(options) or 'none'}"
         )
 
-    try:
-        threshold = float(fields["rule_threshold"])
-    except ValueError:
-        raise DecisionError(
-            f"{path}: rule_threshold `{fields['rule_threshold']}` is not a number"
-        ) from None
-    if not 0.0 <= threshold <= 1.0:
-        raise DecisionError(f"{path}: rule_threshold must be between 0 and 1")
+    threshold: float | None = None
+    if fields["type"] == "score":
+        if "rule_threshold" in fields:
+            raise DecisionError(
+                f"{path}: a score question may not declare rule_threshold"
+            )
+        if "rule_threshold_low" in fields:
+            raise DecisionError(
+                f"{path}: a score question may not declare rule_threshold_low"
+            )
+        if not option_threshold_values:
+            raise DecisionError(
+                f"{path}: a score question declares no `rule_threshold.<option-name>`"
+            )
+    else:
+        if "rule_threshold" not in fields:
+            raise DecisionError(
+                f"{path}: declares no rule_threshold, required for a {fields['type']} question"
+            )
+        try:
+            threshold = float(fields["rule_threshold"])
+        except ValueError:
+            raise DecisionError(
+                f"{path}: rule_threshold `{fields['rule_threshold']}` is not a number"
+            ) from None
+        if not 0.0 <= threshold <= 1.0:
+            raise DecisionError(f"{path}: rule_threshold must be between 0 and 1")
 
     threshold_low: float | None = None
     if fields["type"] == "noul":
@@ -165,6 +197,19 @@ def parse_question(text: str, path: Path) -> Question:
             f"{path}: declares rule_threshold_low, which only a noul question may declare"
         )
 
+    option_thresholds: dict[str, float] = {}
+    for name, value in option_threshold_values.items():
+        try:
+            option_thresholds[name] = float(value)
+        except ValueError:
+            raise DecisionError(
+                f"{path}: rule_threshold.{name} `{value}` is not a number"
+            ) from None
+        if not 0.0 <= option_thresholds[name] <= 1.0:
+            raise DecisionError(
+                f"{path}: rule_threshold.{name} must be between 0 and 1"
+            )
+
     state_fields = tuple(
         part.strip() for part in fields["state_fields"].split(",") if part.strip()
     )
@@ -180,6 +225,7 @@ def parse_question(text: str, path: Path) -> Question:
         rule_threshold_low=threshold_low,
         instructions=instructions,
         path=path,
+        option_thresholds=option_thresholds,
     )
 
 
@@ -249,7 +295,7 @@ def _validate_state(state: dict[str, object]) -> None:
 
 
 def _question_payload(question: Question) -> dict[str, object]:
-    if question.type in ("choice", "noul"):
+    if question.type in ("choice", "noul", "score"):
         return {
             "type": question.type,
             "instructions": question.instructions,
@@ -350,6 +396,29 @@ def parse_response(question: Question, response: dict[str, object]) -> dict[str,
             reason="between_thresholds",
             probabilities=probabilities,
             confidence=max(probability, 1.0 - probability),
+            cost_usd=cost_usd,
+        )
+
+    if question.type == "score":
+        probabilities = answer["probabilities"]
+        confidence = answer["confidence"]
+        for name in question.options:
+            threshold = question.option_thresholds.get(name)
+            if threshold is not None and probabilities[name] >= threshold:
+                return {
+                    "resolved": True,
+                    "decision": name,
+                    "probabilities": probabilities,
+                    "confidence": confidence,
+                    "backend": "jev",
+                    "cost_usd": cost_usd,
+                }
+        return _unresolved(
+            question,
+            backend="jev",
+            reason="below_threshold",
+            probabilities=probabilities,
+            confidence=confidence,
             cost_usd=cost_usd,
         )
 

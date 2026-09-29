@@ -1,9 +1,10 @@
 # S1 · delegating to Codex
 
-**Date:** 2026-09-27, corrected 2026-09-28 · **Phase:** S1 (before C2) · **Status:**
-answered from source and tests; live execution blocked by a local Codex session/auth
-handshake problem on the owner's machine, not by the ChatGPT-subscription design itself ·
-**Verified against:** `codex@openai-codex` plugin 1.0.6, `codex-cli` 0.158.0
+**Date:** 2026-09-27, corrected 2026-09-28, updated 2026-09-28 with a live run ·
+**Phase:** S1 (before C2) · **Status:** answered from source and tests, and now from one
+live run — the restriction is per-model, not account-wide: `gpt-5.6-terra` negotiates
+successfully end to end, `gpt-5.1-codex-max` still returns the identical 400 in the same
+session · **Verified against:** `codex@openai-codex` plugin 1.0.6, `codex-cli` 0.158.0
 
 ## The question
 
@@ -144,19 +145,55 @@ status` in the workspace itself once the job reports done.**
 - Branch/worktree isolation for a delegated task is entirely harnex's to build — checkout
   or worktree, then `--cwd` — as §10 assumed, now confirmed rather than assumed.
 
+## 2026-09-28 update — a live run, model-specific, not account-wide
+
+The entitlement gap above is corrected, not confirmed: this account does not fail to
+negotiate *any* model, it fails to negotiate the eight models this spike happened to try.
+The owner opened Codex interactively and could select `gpt-5.6-terra`, one of OpenAI's
+current flagship models — named by generation (`gpt-6`, `gpt-5.6`) crossed with a
+capability tier (`astra`, `sol`, `luna`, plus `terra` as a 5.6-only mid tier):
+`gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-terra`, `gpt-5.6-luna`.
+None of these six was among the eight models originally tried.
+
+Three live calls, against a fresh scratch repository (git-init'd, one commit — same
+method as the original attempt), same session, same machine:
+
+1. `codex exec --model gpt-5.6-terra --sandbox read-only "Reply with the single word:
+   pong"` — succeeded, no metadata warning, no 400. `pong` back, 7,025 tokens.
+2. `codex-companion.mjs task --model gpt-5.6-terra --cwd <scratch> --prompt-file …` — the
+   actual mechanism `/codex:rescue` shells out to, not `codex exec` directly — asked to
+   write `hello.txt`. With the plugin's default sandbox (no `--write`) it refused,
+   telling the model itself the workspace was read-only; with `--write` it reported
+   `Applying 1 file change(s)` and created the file, confirmed on disk and as
+   `?? hello.txt` in `git status --short`.
+3. `codex exec --model gpt-5.1-codex-max --sandbox read-only "Reply with the single word:
+   pong"`, immediately after, same account, same session — the identical `Model metadata
+   … not found` warning and the identical 400 the original spike recorded.
+
+**Confirmed by observation for the first time**, closing the gap C3 was left to budget
+for: §3's sandbox claim (`read-only` blocks a write; `--write` allows one confined to the
+workspace) and §4's evidence claim (`task`'s payload is progress text and a touched-file
+list, not a diff — the caller reads `git status`/`git diff` itself, exactly as §10
+already assumed). **Still not retested live:** answer 2 — job status, interruption,
+background recovery — since this was a foreground `task` call, not `--background`; that
+part of S1 stands only on source and the fake-fixture tests, unchanged.
+
+**What this corrects in §4 and §13 of the plan:** the restriction is per-model, not
+account-wide. `gpt-5.6-terra` is confirmed live; the other five current flagship models
+are untested — this update has no evidence either way for them, only that they are not
+among the eight already ruled out. Until C3's own config picks a default, treat
+`gpt-5.6-terra` as the one model this account is known to reach, and re-run the one-line
+check below before relying on any other.
+
 ## What would reopen this
 
-A live run, once this account can negotiate a model through Codex again — `codex login`
-was ruled out as the fix during this spike (a fresh login changed nothing), so what's left
-is on OpenAI's side: the account's own Codex entitlement at chatgpt.com, or an OpenAI
-support conversation, or simply time for a rollout gap to close. Once one model succeeds,
-re-run this spike to confirm §3 and §4's sandbox claims by observation rather than by
-reading `codex.mjs`'s options, and to watch one real interruption-and-recovery cycle end
-to end rather than through the fake fixture in `tests/runtime.test.mjs`. No API key and no
-different plan are expected to be necessary in principle — the plugin's own README lists
-ChatGPT subscription, including Free, as sufficient, and the design goal (using the Claude
-Code and Codex subscriptions together, no key for harnex to hold) stands; this note's
-finding is that *this account*, right now, cannot get a model through this path for a
-reason neither the CLI nor its own diagnostics can name further. C3, which builds the loop
-these answers feed, should budget for that confirmation before or during its own manual
-"try it" step, rather than carry these as measured facts.
+Mostly resolved by the update above — a model does negotiate for this account, so the
+account-wide entitlement question is closed. What is still open:
+
+- **Background-job and interruption recovery**, watched live rather than only through the
+  fake fixture in `tests/runtime.test.mjs` — `task --background`, kill the session
+  uncleanly, recover from a fresh one, confirm the pid-staleness gap §10 already assumes.
+- **Whether the other five current flagship models negotiate for this account** —
+  `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna`, `gpt-5.6-sol`, `gpt-5.6-luna` are each a
+  one-line check before anything in the harness relies on them:
+  `codex exec --model <name> --sandbox read-only "reply pong"`.

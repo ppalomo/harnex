@@ -1,5 +1,17 @@
 {
   "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --quiet \"${CLAUDE_PLUGIN_ROOT}/control/guard/guard.py\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [

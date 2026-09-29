@@ -73,8 +73,9 @@ being asked takes a decision that belongs to the person. Build, check, report �
 
 **Enforced by:** the permission floor of pillar 4, which asks the person before a
 command that writes to the history, even when nothing of the harness is running; and the
-shell guard of the same pillar, which is what can tell the shipping phase from any
-other.
+shell guard of the same pillar (`control/guard/guard.py`), which asks before every commit
+alike, in any phase — it has no notion of which phase is running, so it is the person's
+own yes, prompted by that same ask, that tells the shipping phase from any other.
 
 ### Write commit messages in the conventional form, in English, saying what changed and why
 
@@ -110,7 +111,7 @@ When a task seems to need the value itself, that is the moment to ask.
 **Enforced by:** the permission floor of pillar 4, which refuses reads of the credential
 stores outside the project and asks before a read of the project's own — prevention for
 the first, a question for the second, both holding with nothing of the harness running;
-and the shell guard of the same pillar, which is what can see a value being printed,
+and the shell guard of the same pillar (`control/guard/guard.py`), which is what can see a value being printed,
 committed or sent, since no pattern can.
 
 ### Ask the person before deleting anything you were not asked to delete
@@ -121,9 +122,12 @@ deletion is part of the work; outside them it is a surprise, and a surprise the 
 may only notice much later.
 
 **Enforced by:** the permission floor of pillar 4, which asks before the common
-spellings of a removal even when nothing of the harness is running; and the shell guard
-of the same pillar, which is what can tell a deletion inside the task's declared paths
-from one outside them.
+spellings of a removal even when nothing of the harness is running; the shell guard of
+the same pillar (`control/guard/guard.py`), which asks before an ordinary deletion and
+denies the builder role specifically a deletion inside `openspec/` or `.harnex/`,
+regardless of any task; and, for whether a deletion sits inside the paths a task itself
+declares, pillar 5's own check after the fact, since that is task-specific state the
+guard is never handed before a command runs.
 
 ### Ask the person before running a command whose effect cannot be undone
 
@@ -134,7 +138,7 @@ front of them, not a description of it.
 
 **Enforced by:** the permission floor of pillar 4, which asks before the commands it can
 name, including inside a pipeline or a subshell, even when nothing of the harness is
-running; and the shell guard of the same pillar, which classifies every command before
+running; and the shell guard of the same pillar (`control/guard/guard.py`), which classifies every command before
 it runs and asks whenever it is not certain — the only layer that sees a command reached
 through a wrapper or an absolute path.
 
@@ -146,7 +150,7 @@ draft, and none of that can be taken back by deleting the branch afterwards.
 
 **Enforced by:** the permission floor of pillar 4, which asks before any command it can
 name that writes to a remote, even when nothing of the harness is running; and the shell
-guard of the same pillar, which classifies the rest.
+guard of the same pillar (`control/guard/guard.py`), which classifies the rest.
 
 ## sdd
 
