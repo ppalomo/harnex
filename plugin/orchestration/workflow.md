@@ -33,7 +33,7 @@ they exist, since they delegate to a fresh player who can actually be routed.
   verifier has reviewed the change and shown its findings. Whether to revise the proposal
   or move on to `apply` is the person's decision; `propose` does not gate on the review.
 
-## `apply` — not yet implemented, arrives in `C3`
+## `apply` — built, `C3`
 
 - **Enters:** a change whose planning artifacts are complete — in particular, `tasks.md`
   exists and lists every task in order (`docs/PLAN.md` §10: "linear in v0.1").
@@ -44,20 +44,20 @@ they exist, since they delegate to a fresh player who can actually be routed.
   containment, protected paths unchanged, refs unmoved, evidence bound to a tree
   fingerprint) — or escalated to the person when a retry cannot fix it.
 
-## `verify` — not yet implemented, arrives in `C5`
+## `verify` — built, `C5`
 
-- **Enters:** a change whose tasks are all ticked by `apply` (or, mid-way, whichever tasks
-  exist so far).
-- **May write:** nothing — the same read-only boundary as `propose`'s verifier, extended
-  with running the project's own check command and, where a UI profile is in play,
-  checking it in a running app.
-- **Leaves:** a report with findings, each carrying a severity; any blocking finding blocks
-  `ship`, per `docs/PLAN.md`'s disagreement rule.
+- **Enters:** a change on the current branch, with its artifacts and diff ready to verify.
+- **May write:** its own check facts and severity-carrying review record under
+  `.harnex/state/verify/`; it does not change the change or project source. It runs the
+  project's configured check command and, for a UI profile, records Playwright as not
+  configured rather than inspecting a running app.
+- **Leaves:** a report with findings, each carrying a severity and fingerprinted to the tree
+  verified; any blocking finding blocks `ship`, per `docs/PLAN.md`'s disagreement rule.
 
-## `ship` — not yet implemented, arrives in `C5`
+## `ship` — built, `C5`
 
-- **Enters:** `verify` found nothing blocking, or the person overrides a non-blocking
-  finding explicitly.
+- **Enters:** a fresh `verify` run fingerprinted to the current tree, with no blocking
+  finding; the person may then explicitly accept any advisory findings.
 - **May write:** a commit — the only phase that may ever run `git commit`, and only after
   the person's explicit yes — a pull request, and the change's own archive and spec sync.
-- **Leaves:** the change merged or its PR opened, and `openspec/specs/` carrying its deltas.
+- **Leaves:** its PR opened, and `openspec/specs/` carrying its deltas.

@@ -50,9 +50,9 @@ def test_an_agent_has_exactly_the_minimum_frontmatter(path: Path) -> None:
 
 
 @pytest.mark.parametrize("path", AGENT_FILES, ids=lambda p: p.stem)
-def test_the_verifier_role_cannot_write(path: Path) -> None:
-    if path.stem != "verifier":
-        pytest.skip("only the verifier is read-only by role")
+def test_the_read_only_roles_cannot_write(path: Path) -> None:
+    if path.stem not in {"reviewer", "verifier"}:
+        pytest.skip("only reviewer and verifier are read-only by role")
     fields, _ = _read(path)
     tools = _tools(fields)
     forbidden = {"Edit", "Write", "Bash"} & set(tools)
@@ -76,6 +76,11 @@ def test_the_agent_states_its_role_exactly_once(path: Path, plugin_root: Path) -
 
 def test_there_is_at_least_one_skill() -> None:
     assert SKILL_FILES, "no skills under plugin/skills/"
+
+
+def test_the_reviewer_is_explicitly_started_on_opus() -> None:
+    review_skill = Path(__file__).resolve().parent.parent / "plugin" / "skills" / "review" / "SKILL.md"
+    assert "model: opus" in review_skill.read_text(encoding="utf-8")
 
 
 @pytest.mark.parametrize("path", SKILL_FILES, ids=lambda p: p.parent.name)

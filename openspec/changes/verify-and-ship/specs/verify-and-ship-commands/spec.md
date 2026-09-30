@@ -40,23 +40,27 @@ a finding, not a reason to skip the review.
 - **THEN** the facts file is written recording that exit status, and the verifier is
   started and reports it as a finding
 
-### Requirement: `verify` checks the running app only when the project declares a UI profile
+### Requirement: `verify` runs a Playwright step only when the project declares a UI profile
 
-When the project's `.harnex.yml` names a UI profile, `/harnex:verify` SHALL check the
-running app through Playwright MCP and write its findings to the same facts file. When no
-UI profile is declared, `/harnex:verify` SHALL skip this step entirely rather than attempt
-it against a project with nothing to run.
+When the project's `.harnex.yml` names a UI profile, `/harnex:verify` SHALL run a Playwright
+MCP step and write its result to the same facts file. In this version, that step is a
+stubbed placeholder recording that Playwright MCP is not yet configured — an actual
+Playwright check of the running app is not yet built (proposal's Non-Goals) — but the facts
+file SHALL always carry an unambiguous record of whether the step ran or was skipped, so the
+shape is real and testable even before the check itself is. When no UI profile is declared,
+`/harnex:verify` SHALL skip this step entirely rather than attempt it against a project with
+nothing to run.
 
 #### Scenario: A UI profile is declared
 
 - **WHEN** `/harnex:verify` runs on a project whose profile is a UI stack
-- **THEN** the running app is checked through Playwright MCP and the result is written to
-  the facts file before the verifier is started
+- **THEN** the Playwright step runs (today, its stubbed placeholder) and the result is
+  written to the facts file before the verifier is started
 
 #### Scenario: No UI profile is declared
 
 - **WHEN** `/harnex:verify` runs on a project with no UI profile
-- **THEN** no Playwright check is attempted, and the facts file records no such step ran
+- **THEN** no Playwright step is attempted, and the facts file records no such step ran
 
 ### Requirement: `verify` presents the verifier's review with severity, every time
 

@@ -1,19 +1,19 @@
 ## 1. The check-and-facts script
 
-- [ ] 1.1 Write `plugin/scripts/verify_checks.py`: reads `check_command` from `.harnex.yml`,
+- [x] 1.1 Write `plugin/scripts/verify_checks.py`: reads `check_command` from `.harnex.yml`,
       runs it, captures exit status and output, and writes a facts file under
       `.harnex/state/verify/` carrying that result plus a fingerprint of the working tree
       it ran against (reusing `apply_loop.py`'s existing fingerprint function — factor it
       into a shared helper both scripts import, rather than duplicating it). Verify: a unit
       test runs it against a fixture project with a trivial `check_command` (e.g. `true` /
       `false`) and asserts the facts file's exit status, output, and fingerprint.
-- [ ] 1.2 Add the Playwright step: when the project's profile is a UI stack, drive
+- [x] 1.2 Add the Playwright step: when the project's profile is a UI stack, drive
       Playwright MCP against the running app and add its findings to the same facts file;
       when no UI profile is declared, skip the step entirely and record that nothing ran
       (design.md D2, D6). Verify: a fixture test for a UI-profile project (Playwright
       client stubbed) and one for a non-UI project, asserting the facts file's Playwright
       section is present only in the first.
-- [ ] 1.3 Give the script an internal-error path distinct from a failing `check_command`:
+- [x] 1.3 Give the script an internal-error path distinct from a failing `check_command`:
       if it crashes before the facts file is written — interpreter missing,
       `check_command` unset in `.harnex.yml`, the script itself raising — it exits
       signalling that no facts file exists, rather than writing a partial one. Verify: a
@@ -22,7 +22,7 @@
 
 ## 2. The verifier's extended inputs and severity
 
-- [ ] 2.1 Update `plugin/orchestration/roles/verifier.md` per the `verifier` delta spec:
+- [x] 2.1 Update `plugin/orchestration/roles/verifier.md` per the `verifier` delta spec:
       read the diff and the facts file when both are handed to it (a `verify` call), report
       where the diff does not satisfy a spec it claims to implement, report the
       check-command/Playwright facts as given, and carry a severity (`blocking` /
@@ -30,14 +30,14 @@
       file, no severity distinction beyond what already exists) unchanged when neither is
       handed to it. Verify: the review's own report format documents both modes plainly
       enough that a fresh reading of the file tells them apart.
-- [ ] 2.2 Mirror the same content into `plugin/agents/verifier.md`, the Claude Code
+- [x] 2.2 Mirror the same content into `plugin/agents/verifier.md`, the Claude Code
       adapter. Verify: the existing correspondence test between `roles/verifier.md` and
       `agents/verifier.md` passes unchanged (it compares content, not behaviour, so an
       edit to one without the other fails it).
 
 ## 3. The reviewer role
 
-- [ ] 3.1 Write `plugin/orchestration/roles/reviewer.md` per the `reviewer-role` spec: no
+- [x] 3.1 Write `plugin/orchestration/roles/reviewer.md` per the `reviewer-role` spec: no
       write capability, reads the diff from disk, reports code quality (bugs,
       simplification, efficiency) and not spec coherence, never blocks, always runs on the
       fixed model `opus` regardless of which builder built the code under review
@@ -47,7 +47,7 @@
 
 ## 4. `/harnex:review`
 
-- [ ] 4.1 Write `plugin/skills/review/SKILL.md`: print the advice line, read the change's
+- [x] 4.1 Write `plugin/skills/review/SKILL.md`: print the advice line, read the change's
       diff, start the reviewer (always on `opus`, per 3.1 — no binding computation needed),
       and present its findings exactly as returned. Never write anything, never block,
       never require `verify` or `ship` to have run. Verify: covered by the full walkthrough
@@ -55,7 +55,7 @@
 
 ## 5. `verify`'s and `ship`'s gate
 
-- [ ] 5.1 Write `plugin/scripts/ship_gate.py`: given a change directory, determines whether
+- [x] 5.1 Write `plugin/scripts/ship_gate.py`: given a change directory, determines whether
       the most recent `/harnex:verify` run's review is fingerprinted to the current working
       tree and whether it contains a finding marked `blocking`; returns a clear go/refuse
       result naming the reason (no run found, stale fingerprint, or a blocking finding).
@@ -64,7 +64,7 @@
 
 ## 6. `/harnex:verify`
 
-- [ ] 6.1 Write `plugin/skills/verify/SKILL.md`: print the advice line, run 1's script; if
+- [x] 6.1 Write `plugin/skills/verify/SKILL.md`: print the advice line, run 1's script; if
       it signals an internal error, report it and stop without starting the verifier
       (spec's internal-error requirement); otherwise start the verifier with the diff and
       the facts file, and present every finding with its severity. Record the run (its
@@ -73,7 +73,7 @@
 
 ## 7. `/harnex:ship`
 
-- [ ] 7.1 Write `plugin/skills/ship/SKILL.md`: call 5.1's gate; on refusal, report the
+- [x] 7.1 Write `plugin/skills/ship/SKILL.md`: call 5.1's gate; on refusal, report the
       reason and stop. On pass-through, show any non-blocking findings, ask the person for
       an explicit yes, and only on yes: `git commit`, push, `gh pr create` (design.md D5),
       archive the change, and sync its deltas into `openspec/specs/`, in that order. If the
@@ -82,7 +82,7 @@
 
 ## 8. Playwright MCP in setup, and doc corrections
 
-- [ ] 8.1 Before writing it, widen the naming rule `plugin/tools/mcp/playwright.md` would
+- [x] 8.1 Before writing it, widen the naming rule `plugin/tools/mcp/playwright.md` would
       otherwise violate: `AGENTS.md`'s "Technologies are named only in
       `plugin/tools/profiles/`" and `plugin/tools/README.md`'s matching "this is the only
       place a technology may be named" both predate `mcp/` ever holding a file — `mcp/`'s
@@ -93,7 +93,7 @@
       project-owned, written only for a UI profile. Verify: `uv run --with pytest pytest`'s
       layout/private-name check still passes with the new file present, against the widened
       rule.
-- [ ] 8.2 Extend `plugin/scripts/setup.py` per the `project-setup` delta spec: survey
+- [x] 8.2 Extend `plugin/scripts/setup.py` per the `project-setup` delta spec: survey
       `.mcp.json` for the Playwright entry, add it to the plan only when the project's
       recorded profiles include a UI stack and the entry is missing, write it only on
       explicit yes, record it in the manifest by entry, and leave every other `.mcp.json`
@@ -102,12 +102,12 @@
       yes), a non-UI project (never proposed), an already-present entry (left
       byte-identical), and a later profile change in each direction (design.md's Risks;
       `project-setup` spec's scenarios).
-- [ ] 8.3 Correct `plugin/orchestration/workflow.md`: fix `apply`'s entry, still marked "not
+- [x] 8.3 Correct `plugin/orchestration/workflow.md`: fix `apply`'s entry, still marked "not
       yet implemented, arrives in `C3`" though delivered and archived; replace the `verify`
       and `ship` entries' "not yet implemented, arrives in `C5`" with what this change
       actually built. Verify: the file names no phase from `C1`–`C5` as not yet
       implemented.
-- [ ] 8.4 Update `plugin/orchestration/README.md`: its "Filled by" section to record `C5`
+- [x] 8.4 Update `plugin/orchestration/README.md`: its "Filled by" section to record `C5`
       delivered, mirroring how `C3`'s and `C4`'s own lines already read, and its "What is
       here" bullet list to add `../agents/reviewer.md` alongside the existing
       `../agents/verifier.md` and `../agents/builder.md` entries. Verify: both sections name
@@ -115,10 +115,10 @@
 
 ## 9. Full verification
 
-- [ ] 9.1 Run `uv run --with pytest pytest`, `claude plugin validate plugin --strict`,
+- [x] 9.1 Run `uv run --with pytest pytest`, `claude plugin validate plugin --strict`,
       `claude plugin validate . --strict`, and `openspec validate --all`; fix anything they
       catch. Verify: all four exit 0.
-- [ ] 9.2 Manual walkthrough on the scratch project, recorded as this change's own
+- [x] 9.2 Manual walkthrough on the scratch project, recorded as this change's own
       `smoke.md`: run a real change through `explore` → `propose` → `apply` → `review` →
       `verify` → `ship`. Confirm `review`'s findings never affect `ship`; confirm `verify`'s
       severity-carrying findings are shown; confirm `ship` refuses with a named reason when
@@ -130,7 +130,7 @@
 
 ## 10. Plan sync
 
-- [ ] 10.1 Update `docs/PLAN.md` to match what landed, everywhere the reopened decision 4
+- [x] 10.1 Update `docs/PLAN.md` to match what landed, everywhere the reopened decision 4
       and the new role touch it, not only its own numbered entry:
       - §12 decision 4: name four roles (architect, builder, verifier, reviewer) instead of
         three.

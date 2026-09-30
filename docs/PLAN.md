@@ -81,7 +81,7 @@ reached from there:
 
 | Actor | Reached how | Role |
 |---|---|---|
-| **Claude** | the session itself, and subagents | architect (main session), verifier (fresh-context subagent), builder fallback |
+| **Claude** | the session itself, and subagents | architect (main session), verifier (fresh-context subagent), reviewer (fixed-model subagent), builder fallback |
 | **Codex** | the official `codex@openai-codex` plugin: `/codex:rescue` delegates a task, `/codex:review` reviews. Codex CLI is installed but you never drive it. | builder |
 | **Decision model** | a small Python client in the plugin, backend `jev` (via OpenRouter) or `mock` (asks you); swappable | picks tool + model per phase, judges command risk, gates progress |
 | **You** | the commands, and the gates | choose direction, approve plan, approve commits and destructive commands |
@@ -115,14 +115,15 @@ and checked (pillar 5).
 
 ## 4. Roles
 
-Three roles in v0.1, from the role study. Prompts are tool-agnostic and follow one
+Four roles in v0.1, from the role study. Prompts are tool-agnostic and follow one
 skeleton (see the study). The orchestrator is you plus the commands.
 
 | Role | Player | May write | Must refuse | Commands |
 |---|---|---|---|---|
 | `architect` | Claude, main session (`opus`; `fable` for hard designs) | the change's artifacts | source, tests, commits | explore, propose |
 | `builder` | Codex via the plugin; Claude subagent as fallback | source and tests within the task's declared paths | ticking `tasks.md`, committing, editing specs, widening scope | apply |
-| `verifier` | Claude subagent, fresh context, read-only; `/codex:review` as optional second opinion | nothing | fixing, committing, reopening settled decisions | propose (design review), verify |
+| `verifier` | Claude subagent, fresh context, read-only | nothing | fixing, committing, reopening settled decisions | propose (design review), verify |
+| `reviewer` | Claude subagent, fixed on `opus`, read-only | nothing | fixing, committing, judging spec coherence (the verifier's job) | review |
 
 UI design is a `ui` profile the architect loads during `propose`, seeded from the
 existing designer prompt; it produces `design.md`, the builder builds it, the verifier
@@ -148,14 +149,14 @@ reads the `agent_type` field Claude Code adds to a subagent's tool calls. And a 
 `Bash` does not see edits made through `Edit` or `Write`, nor anything Codex does inside
 its own sandbox.
 
-| Rule | architect (main session) | builder · Codex | builder · Claude subagent | verifier |
-|---|---|---|---|---|
-| write only what the role may write | I · D: `propose` reports any change outside the change's directory | I · D: changed paths ⊆ the task's declared paths | I · D: same check | I · P: `tools` has no `Edit`, `Write` or `Bash` |
-| never tick `tasks.md`, never edit specs | — (the architect writes them) | I · D: protected paths (`openspec/`, `.harnex/`) unchanged after the delegation | I · D: same check | P: as above |
-| commit only in `ship` | I · P: guard asks, floor asks | I · D: `HEAD` and refs unchanged after the delegation | I · P: guard asks, floor asks | P: as above |
-| destructive commands, deletions, pushes ask | I · P: guard + floor | I only: `approvalPolicy` is hardcoded to `never` for every delegated call, so Codex itself never pauses to ask ([S1](decisions/2026-09-27-s1-delegating-to-codex.md)) — C4's guard hooks `Bash` in the main session and Claude subagents only, so it does not reach a command Codex runs inside its own sandbox; that ask still depends on Codex's own sandbox until a Codex-side hook is built, later, not in v0.1 · D: the diff is read before acceptance | I · P: guard + floor | P: as above |
-| credentials never leave the machine | I · P: floor denies reading secret files; guard asks | I · P: Codex CLI's own `read-only`/`workspace-write` sandbox toggle, as read from `codex.mjs` and, for `gpt-5.6-terra`, now confirmed by observation — [S1](decisions/2026-09-27-s1-delegating-to-codex.md)'s 2026-09-28 update: `read-only` refused a write the model itself reported, `--write` applied one, confirmed in `git status` | I · P: floor + guard | P: as above |
-| answers end with the canary word | I · D: Stop hook | I only | I · D: SubagentStop hook, when the set is on | I · D: SubagentStop hook |
+| Rule | architect (main session) | builder · Codex | builder · Claude subagent | verifier | reviewer |
+|---|---|---|---|---|---|
+| write only what the role may write | I · D: `propose` reports any change outside the change's directory | I · D: changed paths ⊆ the task's declared paths | I · D: same check | I · P: `tools` has no `Edit`, `Write` or `Bash` | I · P: `tools` has no `Edit`, `Write` or `Bash` |
+| never tick `tasks.md`, never edit specs | — (the architect writes them) | I · D: protected paths (`openspec/`, `.harnex/`) unchanged after the delegation | I · D: same check | P: as above | P: as above |
+| commit only in `ship` | I · P: guard asks, floor asks | I · D: `HEAD` and refs unchanged after the delegation | I · P: guard asks, floor asks | P: as above | P: as above |
+| destructive commands, deletions, pushes ask | I · P: guard + floor | I only: `approvalPolicy` is hardcoded to `never` for every delegated call, so Codex itself never pauses to ask ([S1](decisions/2026-09-27-s1-delegating-to-codex.md)) — C4's guard hooks `Bash` in the main session and Claude subagents only, so it does not reach a command Codex runs inside its own sandbox; that ask still depends on Codex's own sandbox until a Codex-side hook is built, later, not in v0.1 · D: the diff is read before acceptance | I · P: guard + floor | P: as above | P: as above |
+| credentials never leave the machine | I · P: floor denies reading secret files; guard asks | I · P: Codex CLI's own `read-only`/`workspace-write` sandbox toggle, as read from `codex.mjs` and, for `gpt-5.6-terra`, now confirmed by observation — [S1](decisions/2026-09-27-s1-delegating-to-codex.md)'s 2026-09-28 update: `read-only` refused a write the model itself reported, `--write` applied one, confirmed in `git status` | I · P: floor + guard | P: as above | P: as above |
+| answers end with the canary word | I · D: Stop hook | I only | I · D: SubagentStop hook, when the set is on | I · D: SubagentStop hook | I · D: SubagentStop hook |
 
 **What v0.1 honestly offers:** the builder's boundaries are instruction plus
 deterministic detection before acceptance; prevention exists where Claude Code's
@@ -176,7 +177,7 @@ harnex/
     .claude-plugin/plugin.json          name, version
     commands/                           explore, propose, apply, verify, ship (pillar 2) — but see below
     skills/                             setup, update (pillar 2) — setup landed in C1c as a skill, no command
-    agents/                             builder.md, verifier.md (Claude adapters of the roles, pillar 3)
+    agents/                             builder.md, verifier.md, reviewer.md (Claude adapters of the roles, pillar 3)
     hooks/hooks.json                    guard (PreToolUse Bash), canary (Stop, main session only) — inert without .harnex.yml
     context/                            1 · rules/ (one file per rule, grouped in sets), templates/ (AGENTS.md,
                                             CLAUDE.md, .harnex.yml, the pointer lines), memory.md
@@ -227,6 +228,7 @@ state:
 | `.harnex/rules.md` | harness | yes | rendered from the sets chosen |
 | `.harnex/manifest.json` | harness | yes | generation metadata: every harness-owned path and entry, with its hash |
 | `.claude/settings.json` | **shared, by entry** | yes | the harness owns the permission-floor entries it wrote, listed in the manifest; every other entry is yours |
+| `.mcp.json` | **shared, by entry** | yes | the harness owns the Playwright MCP entry it writes (for a UI profile, on explicit yes), listed in the manifest; every other entry is yours |
 | `openspec/config.yaml` | **project** | yes | created only if missing, with the harness's artifact rules; afterwards only you change it |
 | `.harnex/state/` | runtime | no | decision journal and apply run state; ignored by a `.gitignore` inside the directory itself, so the project's own `.gitignore` is never touched |
 
@@ -596,11 +598,16 @@ enforces itself. Each is its own OpenSpec change, in this order.
   - **`claude plugin update` is silently a no-op across an unversioned plugin.** Discovered live, mid-session: the marketplace clone updated past C3's own merge, but `claude plugin update harnex@harnex` reported "already at the latest version (0.1.0)" and left the cached plugin's `skills/` directory stale — because `plugin.json`'s version never bumped across C1–C3. Only `uninstall` + `install` rebuilt the cache. Real versioning is C6's own job; this is recorded here as the concrete evidence for why.
   - **A protected-path check that diffs git-status lines has a blind spot the moment its own subject starts dirty.** `openspec/changes/shell-guard/design.md` was corrected mid-`apply` (by the builder, at the orchestrator's explicit direction) without `check_protected` ever flagging it — because the file was already untracked before `apply`'s own run began, so its status line never changed between the before/after snapshots the check diffs. The gap is in this session's own practice (never committing a change's planning artifacts before starting `apply` on it), not in the check's logic against a normally-committed tree; worth carrying forward as a reason to commit `propose`'s output before `apply` runs against it.
 
-### C5 · verify and ship
-- **Delivers:** the verifier of C2 extended with Playwright MCP and verification of a diff against the specs and the running app, the `verify` command, optional `/codex:review` as second opinion, the `ship` command (commit after your yes, PR, archive, sync specs), the disagreement rule (any blocking finding blocks).
-- **You try it:** finish the C3 change: `/harnex:verify` reports findings with evidence, `/harnex:ship` asks before committing, opens the PR, archives the change. Check the commit has no AI author line.
-- **Tests:** verifier frontmatter still has no `Bash`, `Edit` or `Write`; `ship` refuses without an explicit yes in a recorded transcript; the archive step runs OpenSpec's sync.
-- **Exit:** one change goes explore → ship on the scratch project.
+### C5 · verify and ship — **delivered**, change `verify-and-ship`
+- **Delivers:** a fourth role, `reviewer` (`orchestration/roles/reviewer.md`, `agents/reviewer.md`), read-only and always started on a fixed model (`opus`), independent of who or what built the code under review — this change reopens decision 4 (§12) rather than routing a second opinion through Codex's own `/codex:review`, after the verifier itself caught a real bug in an earlier draft that tried to compute the reviewer's binding from who built the code (design.md D4); `/harnex:review`, a non-blocking, independent command runnable at any point a diff exists, never required by `verify` or `ship`; the verifier extended to a `/harnex:verify` mode — reads a diff and a check-and-facts file from disk rather than running either itself, reports where the diff fails a delta spec, and carries a `blocking`/`advisory` severity on every finding; `plugin/scripts/verify_checks.py`, which runs the project's `check_command` (and, for a UI profile, a stubbed Playwright step) and writes the facts, with an internal-error path distinct from a failing check command (a stderr sentinel, since both cases can share an exit code); `plugin/scripts/ship_gate.py`, which reads the verifier's own stable review record and refuses `ship` with a named reason (no run, a stale fingerprint, or a blocking finding) or passes non-blocking findings through; `/harnex:ship`, the only phase that may run `git commit`, and only after the person's explicit yes, then pushes, opens a pull request via `gh`, and archives the change with its delta specs synced into `openspec/specs/`.
+- **You try it:** finish a change through `/harnex:apply`, then `/harnex:review` (shows code-quality findings, never blocks anything), `/harnex:verify` (runs the check command and, for a UI profile, Playwright; shows every finding with its severity), then `/harnex:ship` — it refuses if `verify` never ran or the tree moved since, shows any advisory finding, asks once, then commits, pushes, opens the pull request, archives the change, and syncs its specs. Check the resulting commit has no AI author or co-author line. Full steps in `openspec/changes/verify-and-ship/smoke.md`.
+- **Tests:** the verifier's two modes and its severity field; the reviewer's tool list (no `Edit`, `Write`, `Bash`) and its correspondence with its own adapter; `verify_checks.py`'s facts, its internal-error path, and its Playwright step (stubbed) for a UI and a non-UI profile; `ship_gate.py`'s four gate outcomes (no run, stale, blocking, go), with a record/check round trip; `setup.py`'s Playwright `.mcp.json` entry, proposed only for a UI profile and only on explicit yes, every other entry left alone.
+- **Exit:** met — a real change ran `explore → propose → apply → review → verify → ship` on a scratch project (`smoke.md`): review never affected ship's own decision, verify's severity-carrying findings were shown, ship refused with a named reason before a fresh `verify` run existed and again after the tree was dirtied, then proceeded once a clean run and an explicit yes stood, and the resulting commit carried no AI author or co-author line. The Playwright/UI path itself is exercised separately, by the person, against a real UI-profile project (proposal's Non-Goals).
+- **What it taught us**, from a real hand-run walkthrough on a scratch project — `review`, `verify`, and `ship` are too new to be installed in any live Claude Code session yet, the same bootstrapping gap `C2`'s and `C3`'s own first runs had, so the walkthrough manually simulated them by handing each role's own current prompt to a generic subagent rather than a named subagent type:
+  - **A task's declared paths can undershoot what its own prose requires.** `apply`'s own router only reads a task's first line for both routing and its declared-path extraction (`extract_declared_paths` runs over one line, not the full multi-line bullet); several tasks in this very change's own `tasks.md` named a file inline (`apply_loop.py`, a companion test file) in a continuation line, never captured as declared scope, so the mechanical scope check flagged real, task-authorized work as a violation more than once during this change's own `apply` run. Recognized case by case, by judgement, rather than by widening the router (out of scope for this change) — worth fixing in the router itself later.
+  - **A check command's own build artifacts must be included in its evidence.** Running `pytest` leaves `__pycache__/` behind; a scratch project with no `.gitignore` sees those directories as untracked. `verify_checks.py` therefore fingerprints after the command completes, so `ship` sees the same tree immediately afterward; the record becomes stale only if the tree changes after verification.
+  - **`ship`'s archive step leaves its own writes uncommitted.** `openspec archive` writes the archived copy and the synced spec, but `ship/SKILL.md` does not commit again afterward — a real project carries that as its own follow-up commit, which the walkthrough surfaced but this change did not change, since neither the task's own text nor the delta specs asked for a second commit.
+  - **`available_profiles()` only recognised profile directories, not files.** `C3` shipped both stack profiles (`fastapi.md`, `react.md`) as flat files, but `setup.py`'s own discovery only checked `path.is_dir()` — so neither profile was actually choosable since `C3` landed (`validate_answers` refused both). This change's own Playwright feature needed a real, choosable UI profile to test against, which surfaced the gap; fixed by also matching `.md` files. Found by a `/harnex:verify` run reading the diff against `docs/PLAN.md`'s own settled decisions, not named in this change's own `design.md` or `tasks.md` beforehand — recorded here per the same convention `C1c`, `C1d`, and `C4` already established for an incidental discovery.
 
 ### C6 · update and release
 - **Delivers:** `/harnex:update` implementing the contract C1c fixed; plugin versioning and `vX.Y.Z` tags; the README rewritten for a stranger; a "verified against" table (Claude Code, Codex, OpenSpec versions); one real project migrated and the old private marketplace deprecated; CI.
@@ -609,15 +616,14 @@ enforces itself. Each is its own OpenSpec change, in this order.
 - **Exit:** `v0.1.0` tagged; a stranger can install it from the README.
 
 Later, not scheduled: tuning thresholds from the journal's resolutions; a Codex-side guard
-hook; a separate `reviewer` role; a `security-reviewer` for projects with an attack
-surface. Never: an unattended mode.
+hook; a `security-reviewer` for projects with an attack surface. Never: an unattended mode.
 
 ## 12. Decisions taken
 
 1. Organised by the five pillars; placement by topic; stacks are profiles.
 2. Claude Code is the only cockpit. Codex is reached through its official plugin only.
 3. Delivery is a Claude Code plugin for behaviour plus a handful of small files per project (§6). Ownership is by file, with a committed hash manifest; the one exception, `.claude/settings.json`, is owned by entry. Copier and the old marketplace are dropped.
-4. Three roles: architect, builder, verifier. The orchestrator is the human. Commits only in `ship`.
+4. Four roles: architect, builder, verifier, reviewer. The orchestrator is the human. Commits only in `ship`.
 5. The decision model sits behind one interface; `jev` and `mock` backends in v0.1; each question carries its own rule on probabilities; `mock` behaviour is defined for every question.
 6. The guard is deterministic first and never allows on its own error; deny never comes from the model alone. Because a hook that crashes or times out cannot answer, a permission floor in `.claude/settings.json` carries the same deny and ask patterns (§9).
 7. The canary is a rule plus a `Stop` hook on the **main session's answers only**, active only in a project that chose the `canary` set; setup proposes `Hullaballoo!`, the word lives in `.harnex.yml`, and setup also states it in `AGENTS.md` since a rendered rules file cannot. Its warning is a signal of non-compliance, not a diagnosis of lost context.

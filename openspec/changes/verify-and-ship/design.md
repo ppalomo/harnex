@@ -74,8 +74,11 @@ just "which inputs it was handed this run."
 
 `/harnex:verify` runs a new script (sibling to `apply_loop.py`, in `plugin/scripts/`) that:
 1. Reads `check_command` from `.harnex.yml` and runs it, capturing exit status and output.
-2. If the project's profile is a UI stack, drives Playwright MCP against the running app
-   and captures its findings.
+2. If the project's profile is a UI stack, runs a Playwright MCP step and captures its
+   findings. In this version that step is a stubbed placeholder (proposal's Non-Goals): it
+   records that Playwright MCP is not yet configured, rather than actually driving it
+   against a running app — the facts-file shape and the profile-gated wiring are real and
+   tested; the check itself is future work.
 3. Writes both to a facts file under `.harnex/state/` (runtime, not committed, same as the
    decision journal and apply's run state).
 4. Only then starts the verifier, pointing it at the facts file and the diff.

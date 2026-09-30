@@ -6,6 +6,7 @@ flat file because every later hook and command reads it. The reader of that flat
 the schema: what it does not understand, it refuses, with the line.
 """
 
+import json
 from pathlib import Path
 
 import pytest
@@ -21,9 +22,8 @@ def test_the_choices_come_from_what_the_harness_holds(plugin_root: Path) -> None
 
 
 def test_a_kind_of_choice_with_nothing_to_choose_from(tmp_path: Path, plugin_root: Path) -> None:
-    """Profiles and features arrive in later phases. Until then the harness holds none,
-    and the question is not asked rather than asked with an empty list."""
-    assert setup.available_profiles(plugin_root) == []
+    """Profile documents and features are both discovered from the harness itself."""
+    assert setup.available_profiles(plugin_root) == ["fastapi", "react"]
     assert setup.available_features(plugin_root) == []
 
     holding = tmp_path / "plugin"
@@ -32,6 +32,12 @@ def test_a_kind_of_choice_with_nothing_to_choose_from(tmp_path: Path, plugin_roo
     (holding / "tools" / "features.json").write_text('[{"name": "guard"}]', encoding="utf-8")
     assert setup.available_profiles(holding) == ["one", "two"]
     assert setup.available_features(holding) == ["guard"]
+
+
+def test_the_playwright_approval_is_per_run(plugin_root: Path, answers) -> None:
+    assert not setup.read_answers(json.dumps(answers), plugin_root).mcp_playwright
+    answers["approvals"]["mcp_playwright"] = True
+    assert setup.read_answers(json.dumps(answers), plugin_root).mcp_playwright
 
 
 def test_the_sets_offered_follow_the_tree(tmp_path: Path) -> None:

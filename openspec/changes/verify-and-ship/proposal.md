@@ -26,10 +26,10 @@ explore → ship" — cannot be met without both phases existing.
 - Extend the existing `verifier` (today: read-only, planning-artifacts-only, invoked once
   by `propose`) to also read a change's diff against its specs, and to receive — as facts
   handed to it, never as its own judgement — the exit status of the project's own
-  `check_command` and, when the project declares a UI profile, a Playwright MCP check of
-  the running app. Both run deterministically outside the verifier's own subagent, the
-  same way `apply_loop.py` already keeps "did the check pass" a fact rather than a
-  builder's self-report.
+  `check_command` and, when the project declares a UI profile, a Playwright MCP step (a
+  stubbed placeholder in this version — see Non-Goals) for the running app. Both run
+  deterministically outside the verifier's own subagent, the same way `apply_loop.py`
+  already keeps "did the check pass" a fact rather than a builder's self-report.
 - Give the verifier's findings a severity of either `blocking` or `advisory`, and scope its
   existing "never blocks" rule to the callers where it still applies (`propose`'s use of
   it): a `blocking` finding now can stop `ship`, which no earlier caller could do.
@@ -110,6 +110,10 @@ explore → ship" — cannot be met without both phases existing.
 - Making the reviewer's fixed model actually exclude the tool that built the code under
   review — the simplified rule (a fixed Claude model, always) is a deliberate, named
   regression from that goal, not an oversight; see "What Changes."
-- Proving the Playwright/running-app path end to end as part of this change's own manual
-  try-it: the person is setting up their own scratch project for that separately, and will
-  report back; this change's own exit criterion is met by the non-UI path.
+- Building a real Playwright MCP check of the running app: `verify_checks.py`'s Playwright
+  step is a stubbed placeholder in this version, always recording that Playwright MCP is
+  not yet configured — the profile-gated wiring and the facts-file shape are real and
+  tested, the check itself is future work. Proving the running-app path end to end is
+  likewise out of scope for this change's own manual try-it: the person is setting up their
+  own scratch project for that separately, and will report back; this change's own exit
+  criterion is met by the non-UI path.
