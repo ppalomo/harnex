@@ -191,7 +191,7 @@ def overview() -> None:
         ("2 · Action & Tools\n(hands)", TOOLS,
          "five commands\nsetup / update skills\nprofiles (stack know-how)\nMCP: context7, markitdown,\nplaywright · Codex plugin"),
         ("3 · Orchestration\n(nervous system)", ORCH,
-         "workflow: explore →\npropose → apply →\nverify → ship\nroles: architect, builder,\nverifier · decision routing"),
+         "workflow: explore →\npropose → apply →\nverify → ship\nroles: architect, builder,\nverifier, reviewer · decision routing"),
         ("4 · Control\n(immune system)", CONTROL,
          "permission floor\n(settings.json)\nshell guard hook\nhuman approvals\n(commit, push, destructive)"),
         ("5 · Feedback\n(vitals)", FEEDBACK,
@@ -227,7 +227,7 @@ def architecture() -> None:
     # column 1: harnex repo
     repo = c.frame(40, 120, 330, 560, "harnex repo (public)")
     r_plugin = c.box(60, 170, 290, 250,
-                     "plugin/  — a Claude Code plugin\n\ncommands: explore, propose,\n  apply, verify, ship\nskills: setup, update\nagents: builder, verifier\nhooks: guard, canary\nscripts: decide, guard, setup (Python)\nprofiles: python-fastapi, react-vite\nrules: git, code, sdd, safety…",
+                     "plugin/  — a Claude Code plugin\n\ncommands: explore, propose,\n  apply, verify, ship\nskills: setup, update\nagents: builder, verifier, reviewer\nhooks: guard, canary\nscripts: decide, guard, setup (Python)\nprofiles: python-fastapi, react-vite\nrules: git, code, sdd, safety…",
                      bg=TOOLS, size=13)
     r_docs = c.box(60, 440, 290, 90, "docs/  plan, diagrams, decisions\nopenspec/  harnex's own specs", bg=NEUTRAL, size=13)
     c.box(60, 550, 290, 110, "Pillars are the layout inside plugin/:\ncontext · tools · orchestration ·\ncontrol · feedback", bg=WHITE, size=13, dashed=True)
@@ -282,7 +282,7 @@ def workflow() -> None:
         ("/harnex:apply", "builder (Codex via plugin,\nor Claude subagent)",
          "one task at a time,\ncheck command after each,\nevidence reported", "check green, scope kept"),
         ("/harnex:verify", "verifier (fresh context)",
-         "diff vs specs, running app\nvia Playwright, optional\n/codex:review second opinion", "no blocking finding"),
+         "diff vs specs and facts\n(check command, Playwright\nwhere a UI profile applies)", "no blocking finding"),
         ("/harnex:ship", "you + main session",
          "commit (after your yes),\nPR, archive the change,\nsync specs", "you merge"),
     ]
@@ -423,9 +423,9 @@ def roadmap() -> None:
         ("C4 · shell guard", CONTROL,
          "PreToolUse hook: allowlist,\ndeny, ask, decision-model\nresidue, journal",
          "rm -rf /tmp/x → denied;\nls → silent; git push → asks;\nbreak the hook → floor asks"),
-        ("C5 · verify + ship", FEEDBACK,
-         "verifier + Playwright,\noptional /codex:review,\ncommit after yes, PR, archive",
-         "finish the C3 change end\nto end and open the PR"),
+        ("C5 · verify + ship (delivered)", FEEDBACK,
+         "reviewer role + /harnex:review,\nverify: facts + severity,\nship: gate, commit, PR, archive",
+         "apply, then review, verify,\nship → PR and archive"),
         ("C6 · update & release", NEUTRAL,
          "/harnex:update on the C1c\ncontract, tags, README,\n'verified against', CI,\na real project migrated",
          "change a rule in harnex,\nrun update in the project,\nonly rules.md changes"),
@@ -441,7 +441,7 @@ def roadmap() -> None:
     for a, b in zip(boxes, boxes[1:]):
         c.arrow(a, b, "rl")
     c.label(40, 440, "Every change also has automated tests that need no credentials: rendered-file snapshots, frontmatter validation,\nhook tests over recorded stdin payloads, a fake Codex runtime for the loop, a mock decision backend, and a\ngrep for private names. The real Codex / Claude / Jev runs are the manual checks above, recorded in docs/smoke.md.", size=14)
-    c.label(40, 520, "Later, not scheduled: real-backend calibration from the decision journal, a Codex-side guard hook,\nand a separate reviewer role. No unattended mode.", size=14)
+    c.label(40, 520, "Later, not scheduled: real-backend calibration from the decision journal, a Codex-side guard hook,\nand a security-reviewer for projects with an attack surface. No unattended mode.", size=14)
     c.save("06-roadmap")
 
 
@@ -461,7 +461,7 @@ def layout() -> None:
     items = [
         ("context/", CONTEXT, "rules/  git · code · sdd · safety · canary · language (one file per rule)\ntemplates/  AGENTS.md, CLAUDE.md, .harnex.yml, rules.md\nmemory.md  progress and hand-off conventions"),
         ("tools/", TOOLS, "mcp/  context7, markitdown, playwright\nprofiles/  python-fastapi, react-vite (stack know-how)\nthe only place technologies are named"),
-        ("orchestration/", ORCH, "workflow.md  the five phases, entry and exit criteria\nroles/  architect, builder, verifier (prompts)\ndecisions/  phase.route, task.route, task.scope (YAML)"),
+        ("orchestration/", ORCH, "workflow.md  the five phases, entry and exit criteria\nroles/  architect, builder, verifier, reviewer (prompts)\ndecisions/  phase.route, task.route, task.scope (YAML)"),
         ("control/", CONTROL, "floor.json  the permission floor setup merges into settings\nguard/  patterns.yaml, guard.py (PreToolUse hook)\napprovals.md  what always asks you"),
         ("feedback/", FEEDBACK, "check-command.md  the contract a project declares\ncanary/  canary.py (Stop hook)\nscope_check.py  detects a write outside a change's own directory\njournal/  decision journal format"),
     ]
@@ -471,7 +471,7 @@ def layout() -> None:
         b = c.box(620, y, 160, 60, name, bg=bg, size=14)
         c.box(800, y, 560, 60, body, bg=WHITE, size=11)
         c.arrow(plugin, b, "bl", via=[(430, y + 30)]) if i else c.arrow(plugin, b, "rl")
-    c.box(620, 570, 740, 60, "at the plugin root, where Claude Code reads them (each piece belongs to one pillar): commands/ (5) · skills/ (setup, update)\nagents/ (builder, verifier) · hooks/ · scripts/ (render_rules, decide, setup, update) · .claude-plugin/plugin.json",
+    c.box(620, 570, 740, 60, "at the plugin root, where Claude Code reads them (each piece belongs to one pillar): commands/ (5) · skills/ (setup, update)\nagents/ (builder, verifier, reviewer) · hooks/ · scripts/ (render_rules, decide, setup, update) · .claude-plugin/plugin.json",
           bg=NEUTRAL, size=12)
     c.save("07-layout")
 

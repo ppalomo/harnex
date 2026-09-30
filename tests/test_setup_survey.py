@@ -161,3 +161,105 @@ def test_a_record_the_harness_cannot_read_stops_it(
 def test_an_absent_record_is_not_an_error(project: Path, plugin_root: Path, answers) -> None:
     assert setup.read_manifest(project) is None
     assert not _plan(project, plugin_root, answers).conflicts
+
+
+def test_a_ui_profile_proposes_the_playwright_entry_until_approved(
+    project: Path, plugin_root: Path, answers
+) -> None:
+    answers["profiles"] = ["react"]
+    plan = _plan(project, plugin_root, answers)
+
+    step = _step(plan, setup.MCP_CONFIG)
+    assert step.action == setup.KEEP and step.data is None
+    expected = "\n".join(
+        "    " + line
+        for line in json.dumps({"mcpServers": {"playwright": setup.PLAYWRIGHT_MCP}}, indent=2).splitlines()
+    )
+    assert expected in "\n".join(plan.notices)
+
+
+@pytest.mark.parametrize("profiles", [[], ["fastapi"]])
+def test_a_non_ui_profile_never_proposes_or_writes_playwright(
+    project: Path, plugin_root: Path, answers, setup_run, profiles: list[str]
+) -> None:
+    answers["profiles"] = profiles
+    assert all(step.path != setup.MCP_CONFIG for step in _plan(project, plugin_root, answers).steps)
+
+    code, _ = setup_run("write", project, answers)
+    assert code == 0
+    assert not (project / setup.MCP_CONFIG).exists()
+
+
+def test_a_plausible_frontend_profile_outside_ui_registry_gets_no_playwright_entry(
+    project: Path, tmp_path: Path
+) -> None:
+    plugin_root = tmp_path / "plugin"
+    registry = plugin_root / "tools" / "profiles" / "ui.json"
+    registry.parent.mkdir(parents=True)
+    registry.write_text('["react"]\n', encoding="utf-8")
+    answers = setup.Answers(
+        project_name="fixture",
+        profiles=("svelte",),
+        sets=("git",),
+        features=(),
+        canary="",
+        decision_model="mock",
+        check_command="true",
+    )
+    plan = setup.Plan(project)
+
+    owned = setup._plan_mcp(plan, project, plugin_root, answers, None)
+
+    assert owned == {}
+    assert all(step.path != setup.MCP_CONFIG for step in plan.steps)
+
+
+def test_an_existing_playwright_entry_is_left_byte_identical(
+    project: Path, plugin_root: Path, answers, setup_run
+) -> None:
+    answers["profiles"] = ["react"]
+    original = b'{\n  "mcpServers": {"playwright": {"command": "custom"}},\n  "project": true\n}\n'
+    (project / setup.MCP_CONFIG).write_bytes(original)
+
+    plan = _plan(project, plugin_root, answers)
+    step = _step(plan, setup.MCP_CONFIG)
+    assert step.action == setup.KEEP
+    assert step.detail == 'a different "playwright" entry already exists; left alone'
+    code, _ = setup_run("write", project, answers)
+    assert code == 0
+    assert (project / setup.MCP_CONFIG).read_bytes() == original
+
+
+def test_a_matching_existing_playwright_entry_is_identified_as_harness_owned(
+    project: Path, plugin_root: Path, answers
+) -> None:
+    answers["profiles"] = ["react"]
+    (project / setup.MCP_CONFIG).write_text(
+        json.dumps({"mcpServers": {"playwright": setup.PLAYWRIGHT_MCP}}), encoding="utf-8"
+    )
+
+    step = _step(_plan(project, plugin_root, answers), setup.MCP_CONFIG)
+
+    assert step.detail == "already carries the Playwright MCP entry"
+
+
+def test_profile_changes_re_evaluate_playwright_without_removing_it(
+    project: Path, plugin_root: Path, answers, setup_run
+) -> None:
+    setup_run("write", project, answers)
+    assert not (project / setup.MCP_CONFIG).exists()
+
+    answers["profiles"] = ["react"]
+    assert _step(_plan(project, plugin_root, answers), setup.MCP_CONFIG).action == setup.KEEP
+    answers["approvals"]["mcp_playwright"] = True
+    code, _ = setup_run("write", project, answers)
+    assert code == 0
+    before = (project / setup.MCP_CONFIG).read_bytes()
+    record = json.loads((project / setup.MANIFEST).read_text(encoding="utf-8"))
+    assert record["entries"][setup.MCP_CONFIG] == {"mcpServers": ["playwright"]}
+
+    answers["profiles"] = []
+    assert all(step.path != setup.MCP_CONFIG for step in _plan(project, plugin_root, answers).steps)
+    code, _ = setup_run("write", project, answers)
+    assert code == 0
+    assert (project / setup.MCP_CONFIG).read_bytes() == before

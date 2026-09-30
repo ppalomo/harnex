@@ -31,11 +31,18 @@ The nervous system: who does what, in which order, and who decides.
   directory — the same reason `../tools/README.md` names `setup.py` the same way.
 - `../scripts/apply_loop.py` — the apply loop's own filesystem and process steps (`C3`),
   kept in `scripts/` for the same reason.
+- `../scripts/verify_checks.py` — runs the configured check and records the facts the
+  verifier receives (`C5`), kept in `scripts/` for the same reason.
+- `../scripts/ship_gate.py` — records verifier findings and decides whether a fresh,
+  non-blocking verification may proceed to `ship` (`C5`), kept in `scripts/` for the same
+  reason.
 - `../agents/verifier.md` — the verifier's Claude Code adapter, binding the role prompt
   under `roles/verifier.md`.
 - `../agents/builder.md` — the builder's Claude Code adapter (`C3`), binding
   `roles/builder.md`; the Codex binding is reached through its own plugin, not adapted
   here.
+- `../agents/reviewer.md` — the reviewer's Claude Code adapter (`C5`), binding
+  `roles/reviewer.md`; it always runs on the fixed `opus` model.
 
 ## Filled by
 
@@ -46,3 +53,8 @@ before anything runs.
 `C3` — **delivered**: the `builder` role and its two bindings, `task.route` and
 `task.scope`, `decide_many()`, and `apply_loop.py`. Next: `C4` adds `guard.risk` in
 pillar 4, not here.
+
+`C5` — **delivered**: the `reviewer` role prompt and its Claude Code adapter; the
+verifier's `/harnex:verify` extension for the diff, facts file, and severity-carrying
+findings; `verify_checks.py` and `ship_gate.py`; and the workflow's `verify` and `ship`
+entries. Next: `C6` adds the update command in pillar 2, not here.

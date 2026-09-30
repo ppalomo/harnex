@@ -22,6 +22,7 @@ should not begin by resolving one.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import os
@@ -45,6 +46,7 @@ RULES = ".harnex/rules.md"
 STATE_IGNORE = ".harnex/state/.gitignore"
 MANIFEST = ".harnex/manifest.json"
 SETTINGS = ".claude/settings.json"
+MCP_CONFIG = ".mcp.json"
 
 PROJECT_PATHS = (AGENTS, CLAUDE, CHOICES, OPENSPEC_CONFIG)
 HARNESS_PATHS = (RULES, STATE_IGNORE)
@@ -72,6 +74,8 @@ MANIFEST_FORMAT = 1
 FLOOR_FORMAT = 1
 
 BYPASS_MODES = ("bypassPermissions",)
+
+PLAYWRIGHT_MCP = {"command": "npx", "args": ["@playwright/mcp@latest"]}
 
 # What setup proposes when a project chooses the canary set. The word itself is the
 # project's to change; the proposal lives here so that no command has to remember it.
@@ -113,6 +117,7 @@ class Answers:
     check_command: str
     pointer_agents: bool = False
     pointer_claude: bool = False
+    mcp_playwright: bool = False
     adopt: tuple[str, ...] = ()
 
     def as_choices(self) -> dict[str, object]:
@@ -134,11 +139,15 @@ def available_sets(plugin_root: Path) -> list[str]:
 
 
 def available_profiles(plugin_root: Path) -> list[str]:
-    """The profiles the harness holds. None, until a change adds the first one."""
+    """The profiles the harness holds, declared as files or profile directories."""
     directory = plugin_root / "tools" / "profiles"
     if not directory.is_dir():
         return []
-    return sorted(p.name for p in directory.iterdir() if p.is_dir())
+    return sorted(
+        path.name if path.is_dir() else path.stem
+        for path in directory.iterdir()
+        if path.is_dir() or path.suffix == ".md"
+    )
 
 
 def available_features(plugin_root: Path) -> list[str]:
@@ -151,6 +160,18 @@ def available_features(plugin_root: Path) -> list[str]:
     except json.JSONDecodeError as error:
         raise SetupError(f"{registry}: {error}") from error
     return sorted(str(item["name"]) for item in declared)
+
+
+def ui_profiles(plugin_root: Path) -> list[str]:
+    """The profiles that declare a UI stack, from the profile-owned registry."""
+    registry = plugin_root / "tools" / "profiles" / "ui.json"
+    if not registry.is_file():
+        return []
+    try:
+        declared = json.loads(registry.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        raise SetupError(f"{registry}: {error}") from error
+    return sorted(str(item) for item in declared)
 
 
 def read_answers(text: str, plugin_root: Path) -> Answers:
@@ -194,6 +215,7 @@ def read_answers(text: str, plugin_root: Path) -> Answers:
         check_command=str(values["check_command"]),
         pointer_agents=bool(approvals.get("pointer_agents", False)),
         pointer_claude=bool(approvals.get("pointer_claude", False)),
+        mcp_playwright=bool(approvals.get("mcp_playwright", False)),
         adopt=tuple(approvals.get("adopt", ()) or ()),
     )
     validate_answers(answers, plugin_root)
@@ -539,7 +561,8 @@ def build_plan(project: Path, plugin_root: Path, answers: Answers) -> Plan:
     _plan_project_files(plan, project, plugin_root, answers)
     _plan_harness_files(plan, project, answers, desired, why, recorded_paths, record is None)
     owned = _plan_settings(plan, project, plugin_root, record)
-    _plan_record(plan, project, desired, owned)
+    mcp_owned = _plan_mcp(plan, project, plugin_root, answers, record)
+    _plan_record(plan, project, desired, owned, mcp_owned)
     return plan
 
 
@@ -739,6 +762,103 @@ def _settings_bytes(settings: dict[str, object]) -> bytes:
     return (json.dumps(settings, indent=2) + "\n").encode("utf-8")
 
 
+def _recorded_mcp_entries(record: dict[str, object] | None) -> dict[str, list[str]]:
+    """Keep this shared file's recorded ownership when a UI profile is later removed."""
+    entries = record.get("entries", {}) if record else {}
+    owned = entries.get(MCP_CONFIG, {}) if isinstance(entries, dict) else {}
+    servers = owned.get("mcpServers", []) if isinstance(owned, dict) else []
+    return {"mcpServers": ["playwright"]} if "playwright" in servers else {}
+
+
+def _mcp_entry_notice() -> str:
+    return json.dumps({"mcpServers": {"playwright": PLAYWRIGHT_MCP}}, indent=2)
+
+
+def _plan_mcp(
+    plan: Plan,
+    project: Path,
+    plugin_root: Path,
+    answers: Answers,
+    record: dict[str, object] | None,
+) -> dict[str, list[str]]:
+    """Offer the Playwright server only to projects that currently choose a UI profile."""
+    if not any(profile in ui_profiles(plugin_root) for profile in answers.profiles):
+        return _recorded_mcp_entries(record)
+
+    current = _read(project / MCP_CONFIG)
+    if current is None:
+        if answers.mcp_playwright:
+            plan.steps.append(
+                Step(
+                    MCP_CONFIG,
+                    "shared",
+                    CREATE,
+                    "the Playwright MCP entry",
+                    _settings_bytes({"mcpServers": {"playwright": PLAYWRIGHT_MCP}}),
+                )
+            )
+            return {"mcpServers": ["playwright"]}
+        plan.steps.append(Step(MCP_CONFIG, "shared", KEEP, "no Playwright MCP entry yet"))
+        plan.notices.append(
+            f"{MCP_CONFIG} has no Playwright MCP entry. It would add:\n"
+            + "\n".join("    " + line for line in _mcp_entry_notice().splitlines())
+        )
+        return {}
+
+    try:
+        config = json.loads(current.decode("utf-8"))
+    except (json.JSONDecodeError, UnicodeDecodeError) as error:
+        plan.steps.append(Step(MCP_CONFIG, "shared", CONFLICT, "cannot be read as JSON"))
+        plan.conflicts.append(
+            f"{MCP_CONFIG} cannot be read as JSON ({error}). The Playwright entry is merged "
+            "by key, never as text, so the file has to be readable first."
+        )
+        return {}
+    if not isinstance(config, dict):
+        plan.steps.append(Step(MCP_CONFIG, "shared", CONFLICT, "is not an object"))
+        plan.conflicts.append(f"{MCP_CONFIG} is not a JSON object, so it holds no entries to merge.")
+        return {}
+
+    merged = copy.deepcopy(config)
+    servers = merged.setdefault("mcpServers", {})
+    if not isinstance(servers, dict):
+        plan.steps.append(Step(MCP_CONFIG, "shared", CONFLICT, "`mcpServers` is not an object"))
+        plan.conflicts.append(f"{MCP_CONFIG}: `mcpServers` is not an object.")
+        return {}
+
+    if "playwright" in servers:
+        owned = _recorded_mcp_entries(record)
+        if not owned and servers["playwright"] == PLAYWRIGHT_MCP:
+            owned = {"mcpServers": ["playwright"]}
+        detail = (
+            "already carries the Playwright MCP entry"
+            if owned
+            else 'a different "playwright" entry already exists; left alone'
+        )
+        plan.steps.append(Step(MCP_CONFIG, "shared", KEEP, detail))
+        return owned
+
+    if answers.mcp_playwright:
+        servers["playwright"] = PLAYWRIGHT_MCP
+        plan.steps.append(
+            Step(
+                MCP_CONFIG,
+                "shared",
+                MERGE,
+                "the Playwright MCP entry added, every other entry kept",
+                _settings_bytes(merged),
+            )
+        )
+        return {"mcpServers": ["playwright"]}
+
+    plan.steps.append(Step(MCP_CONFIG, "shared", KEEP, "no Playwright MCP entry yet"))
+    plan.notices.append(
+        f"{MCP_CONFIG} has no Playwright MCP entry. It would add:\n"
+        + "\n".join("    " + line for line in _mcp_entry_notice().splitlines())
+    )
+    return {}
+
+
 def _notice_overlaps(plan: Plan, permissions: dict[str, object], wanted: dict[str, list[str]]) -> None:
     allows = permissions.get("allow", [])
     if not isinstance(allows, list):
@@ -771,10 +891,16 @@ def _notice_bypass(plan: Plan, permissions: dict[str, object]) -> None:
 
 
 def _plan_record(
-    plan: Plan, project: Path, desired: dict[str, bytes], owned: dict[str, list[str]]
+    plan: Plan,
+    project: Path,
+    desired: dict[str, bytes],
+    owned: dict[str, list[str]],
+    mcp_owned: dict[str, list[str]],
 ) -> None:
     paths = {path: digest(body) for path, body in sorted(desired.items())}
     entries = {SETTINGS: owned} if owned["deny"] or owned["ask"] else {}
+    if mcp_owned:
+        entries[MCP_CONFIG] = mcp_owned
     body = manifest_bytes(paths, entries)
     current = _read(project / MANIFEST)
     if current == body:

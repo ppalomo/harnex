@@ -7,8 +7,9 @@ The hands: what the agent can actually do, and what it needs installed to do it.
 - **MCP server declarations** under `mcp/`: which servers a harnessed project gets, and
   what each is for.
 - **Stack profiles** under `profiles/`: one file per stack, holding its check command, its
-  conventions and the tools it expects. **This is the only place in the plugin where a
-  technology may be named.** A profile is chosen per project, not assumed.
+  conventions and the tools it expects. **`plugin/tools/profiles/` and `plugin/tools/mcp/`
+  are the only places in the plugin where a technology may be named.** A profile is chosen
+  per project, not assumed.
 
 ## What does not
 

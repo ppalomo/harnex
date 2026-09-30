@@ -26,7 +26,6 @@ sibling modules in `scripts/` and `feedback/` respectively.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import re
@@ -39,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "feedback"))
 import decide  # noqa: E402  (a plugin script, reached by path)
 import task_scope_check  # noqa: E402  (a plugin script, reached by path)
+from working_tree import tree_fingerprint  # noqa: E402  (a plugin script, reached by path)
 
 TASK_LINE = re.compile(r"^(?P<indent>\s*)- \[(?P<mark>[ xX])\] (?P<id>\S+) (?P<text>.*)$")
 PATH_SPAN = re.compile(r"`([^`\s]+/[^`\s]+)`")
@@ -111,32 +111,6 @@ def tick_task(project: Path, change: str, task_id: str) -> None:
 
 
 # --- fingerprinting ----------------------------------------------------------------------
-
-
-def tree_fingerprint(project: Path, base_ref: str) -> str:
-    """`sha256` of the diff against `base_ref` plus a sorted listing of untracked files
-    and their own content — the working tree, never a commit, since `apply` never
-    commits (`docs/PLAN.md` §10)."""
-    diff = subprocess.run(
-        ["git", "-C", str(project), "diff", base_ref],
-        capture_output=True, text=True, check=True,
-    ).stdout
-    status = subprocess.run(
-        ["git", "-C", str(project), "status", "--porcelain=v1", "--untracked-files=all"],
-        capture_output=True, text=True, check=True,
-    ).stdout
-    untracked = sorted(
-        line[3:] for line in status.splitlines() if line.startswith("??")
-    )
-
-    hasher = hashlib.sha256()
-    hasher.update(diff.encode("utf-8"))
-    for path in untracked:
-        hasher.update(path.encode("utf-8"))
-        file_path = project / path
-        if file_path.is_file():
-            hasher.update(file_path.read_bytes())
-    return hasher.hexdigest()
 
 
 def current_head(project: Path) -> str:

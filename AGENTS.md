@@ -24,7 +24,7 @@ deltas into `openspec/specs/` and update `docs/PLAN.md` to match.
   is two components.
 - `plugin/commands/`, `skills/`, `agents/`, `hooks/` and `scripts/` are where Claude Code
   looks; what they contain still belongs to one pillar and says which.
-- Technologies are named only in `plugin/tools/profiles/`.
+- Technologies are named only in `plugin/tools/profiles/` and `plugin/tools/mcp/`.
 - Nothing committed names a project, its domain vocabulary, a private resource or a
   credential. A component that needs a project fact reads it from the importing
   project's `AGENTS.md` at task time, and says so.

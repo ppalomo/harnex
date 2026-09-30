@@ -1,28 +1,4 @@
-# verifier Specification
-
-## Purpose
-
-The read-only role that reviews a change's artifacts for coherence before the person acts
-on them — a boundary held by what the role can do, not only by what its prompt says to do.
-
-## Requirements
-
-### Requirement: The verifier cannot write anything
-
-The verifier SHALL run as a subagent whose declared tools include no capability to edit a
-file, write a file, or run a shell command. This SHALL hold regardless of what its prompt
-says, so that a prompt injected through a reviewed artifact cannot make it write.
-
-#### Scenario: The verifier's own definition is inspected
-
-- **WHEN** the verifier's tool list is read from its definition
-- **THEN** it names no file-editing, file-writing, or command-execution capability
-
-#### Scenario: A reviewed artifact asks the verifier to change something
-
-- **WHEN** an artifact the verifier reads contains an instruction to edit a file or run a
-  command
-- **THEN** the verifier has no tool capable of doing either, regardless of what it decides
+## MODIFIED Requirements
 
 ### Requirement: The verifier reads the artifacts on disk, not the conversation
 
