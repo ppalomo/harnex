@@ -295,11 +295,20 @@ def _validate_state(state: dict[str, object]) -> None:
 
 
 def _question_payload(question: Question) -> dict[str, object]:
-    if question.type in ("choice", "noul", "score"):
+    if question.type in ("choice", "noul"):
         return {
             "type": question.type,
             "instructions": question.instructions,
             "criteria": dict(question.options),
+        }
+    if question.type == "score":
+        # The live API rejects an object here (`criteria` must be an array for `score`,
+        # unlike `choice`/`noul`); a plain option name is both accepted and the most
+        # direct match against the response's own `legend`, which echoes it back verbatim.
+        return {
+            "type": question.type,
+            "instructions": question.instructions,
+            "criteria": list(question.options),
         }
     raise DecisionError(
         f"decide.py does not yet build a request for type `{question.type}`"
@@ -400,7 +409,14 @@ def parse_response(question: Question, response: dict[str, object]) -> dict[str,
         )
 
     if question.type == "score":
-        probabilities = answer["probabilities"]
+        # The response keys `probabilities` by stringified index, not option name; `legend`
+        # is the only way back to the name, and the probabilities sum to 1 across every
+        # declared option rather than being independent per-option figures.
+        legend = answer["legend"]
+        raw_probabilities = answer["probabilities"]
+        probabilities = {
+            name: raw_probabilities[index] for index, name in legend.items()
+        }
         confidence = answer["confidence"]
         for name in question.options:
             threshold = question.option_thresholds.get(name)
