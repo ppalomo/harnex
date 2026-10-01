@@ -31,6 +31,7 @@ import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
@@ -513,6 +514,7 @@ INSERT = "insert"
 ADOPT = "adopt"
 MERGE = "merge"
 CONFLICT = "conflict"
+MISSING = "missing"
 
 
 @dataclass
@@ -544,7 +546,12 @@ def _read(path: Path) -> bytes | None:
     return path.read_bytes() if path.is_file() else None
 
 
-def build_plan(project: Path, plugin_root: Path, answers: Answers) -> Plan:
+def build_plan(
+    project: Path,
+    plugin_root: Path,
+    answers: Answers,
+    mode: Literal["setup", "update"] = "setup",
+) -> Plan:
     """Survey every path, classify it by its content, and say what would happen to it."""
     plan = Plan(project=project)
     record = read_manifest(project)
@@ -559,7 +566,7 @@ def build_plan(project: Path, plugin_root: Path, answers: Answers) -> Plan:
         STATE_IGNORE: "the state directory ignores itself",
     }
 
-    _plan_project_files(plan, project, plugin_root, answers)
+    _plan_project_files(plan, project, plugin_root, answers, mode)
     _plan_harness_files(plan, project, answers, desired, why, recorded_paths, record is None)
     owned = _plan_settings(plan, project, plugin_root, record)
     mcp_owned = _plan_mcp(plan, project, plugin_root, answers, record)
@@ -568,7 +575,11 @@ def build_plan(project: Path, plugin_root: Path, answers: Answers) -> Plan:
 
 
 def _plan_project_files(
-    plan: Plan, project: Path, plugin_root: Path, answers: Answers
+    plan: Plan,
+    project: Path,
+    plugin_root: Path,
+    answers: Answers,
+    mode: Literal["setup", "update"] = "setup",
 ) -> None:
     pointers = {
         AGENTS: (load_pointer(plugin_root, "agents"), answers.pointer_agents, "agents"),
@@ -598,6 +609,15 @@ def _plan_project_files(
     for path in PROJECT_PATHS:
         current = _read(project / path)
         if current is None:
+            if mode == "update":
+                plan.steps.append(
+                    Step(path, "project", MISSING, f"{path} is missing; setup creates it")
+                )
+                plan.notices.append(
+                    f"{path} is missing. Update never creates a project-owned file; "
+                    "run setup to create it."
+                )
+                continue
             body = render_template(plugin_root, templates[path], tokens[path]())
             plan.steps.append(
                 Step(path, "project", CREATE, "from the harness's template", body.encode("utf-8"))

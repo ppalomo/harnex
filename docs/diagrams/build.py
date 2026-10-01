@@ -426,8 +426,8 @@ def roadmap() -> None:
         ("C5 · verify + ship (delivered)", FEEDBACK,
          "reviewer role + /harnex:review,\nverify: facts + severity,\nship: gate, commit, PR, archive",
          "apply, then review, verify,\nship → PR and archive"),
-        ("C6 · update & release", NEUTRAL,
-         "/harnex:update on the C1c\ncontract, tags, README,\n'verified against', CI,\na real project migrated",
+        ("C6 · update & release (code done, tag + migration owed)", NEUTRAL,
+         "/harnex:update on the C1c\ncontract, tags, README,\n'verified against', CI",
          "change a rule in harnex,\nrun update in the project,\nonly rules.md changes"),
     ]
     bw, gap = 176, 10

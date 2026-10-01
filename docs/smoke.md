@@ -531,3 +531,102 @@ live `jev` call as its.
 - Step 7: one journal line per `task.route` question (one per task, sharing no state —
   `decide_many`'s one batched call, design.md D2) and, for any paths-less task, one more
   for `task.scope`.
+
+---
+
+## update-and-release (C6)
+
+**Delivers:** `/harnex:update` — refreshing `.harnex/rules.md`, the permission-floor
+entries and the Playwright entry from a project's own recorded choices, asking nothing —
+and the release shape around it: plugin versioning, `vX.Y.Z` tags, and the steps an owner
+actually runs to pick up a harness change (`docs/PLAN.md`'s own C6 line: change a rule in
+your harnex checkout, bump the version, `claude plugin update harnex`, `/harnex:update` in
+the project).
+
+**Verified against:** Claude Code 2.1.285, Python 3.13 through `uv`.
+
+**Steps**
+
+1. Set up a scratch project with the `git` and `sdd` sets:
+   ```bash
+   mkdir -p /tmp/harnex-update && cd /tmp/harnex-update && git init -q
+   cd ~/Developer/harnex
+   cat > /tmp/harnex-update-answers.json <<'JSON'
+   {"project_name": "update-smoke", "profiles": [], "sets": ["git", "sdd"], "features": [],
+    "canary": "", "decision_model": "mock", "check_command": "make check",
+    "approvals": {"pointer_agents": true, "pointer_claude": true, "adopt": []}}
+   JSON
+   uv run plugin/scripts/setup.py write --answers /tmp/harnex-update-answers.json \
+     --project /tmp/harnex-update
+   git -C /tmp/harnex-update add -A && git -C /tmp/harnex-update commit -qm "harnessed"
+   ```
+2. Change a rule in your harnex checkout, as if preparing a release — bump the plugin
+   version too, the way a real release would (skip the version bump here if you only want
+   to prove the refresh itself; it does not change what `update` does):
+   ```bash
+   printf '\nAn added sentence, for this check only.\n' >> \
+     plugin/context/rules/git/conventional-commits.md
+   git status --short plugin/context/rules/git/conventional-commits.md
+   ```
+3. Refresh the scratch project from this checkout and look at what moved:
+   ```bash
+   uv run plugin/scripts/update.py --project /tmp/harnex-update
+   git -C /tmp/harnex-update status --short
+   git -C /tmp/harnex-update diff --stat
+   git -C /tmp/harnex-update add -A && git -C /tmp/harnex-update commit -qm "after update"
+   ```
+4. Edit `.harnex/rules.md` by hand, simulating someone's own edit landing after a run, and
+   update again:
+   ```bash
+   echo "rules I wrote by hand" >> /tmp/harnex-update/.harnex/rules.md
+   uv run plugin/scripts/update.py --project /tmp/harnex-update; echo "exit $?"
+   git -C /tmp/harnex-update status --short
+   ```
+5. Put the rules file back, then change the rule again, to a second, different content:
+   ```bash
+   git -C /tmp/harnex-update checkout -- .harnex/rules.md
+   printf 'A second added sentence, for this check only.\n' >> \
+     plugin/context/rules/git/conventional-commits.md
+   ```
+6. Simulate an interruption — a run that finished writing the rules file for this second
+   change but was killed before it reached the manifest, the same shape
+   `tests/test_update_run.py`'s `test_an_interrupted_update_recovers_by_content` proves:
+   write the rules file directly, by hand, to exactly the content this run would produce,
+   without going through `update.py`, and leave the manifest stale, still recording the
+   first change:
+   ```bash
+   uv run plugin/scripts/render_rules.py --sets git,sdd --out /tmp/harnex-update/.harnex/rules.md
+   git -C /tmp/harnex-update status --short
+   ```
+7. Run update once more and confirm it finishes from where the interruption left it:
+   ```bash
+   uv run plugin/scripts/update.py --project /tmp/harnex-update
+   git -C /tmp/harnex-update status --short
+   ```
+8. Undo both rule edits in your checkout and tidy up:
+   ```bash
+   git checkout -- plugin/context/rules/git/conventional-commits.md
+   rm -rf /tmp/harnex-update /tmp/harnex-update-answers.json
+   ```
+
+**Expect**
+
+- Step 3: the report says `Written:` and names `.harnex/rules.md` and `.harnex/manifest.json`
+  only. `git status --short` in the scratch project shows exactly those two paths modified
+  — nothing project-owned (`AGENTS.md`, `CLAUDE.md`, `.harnex.yml`) moves, and no new file
+  appears. `git diff --stat` confirms the same two paths and nothing else.
+- Step 4: update **stops**, exits non-zero, names `.harnex/rules.md` in its report, and
+  calls it a conflict — edited after the harness wrote it — pointing at `/harnex:setup`'s
+  own adoption path rather than writing anything. `git status --short` still shows only the
+  hand edit: update wrote nothing on top of it.
+- Step 6: after hand-writing the second change's rendering straight into the project, the
+  tree shows only `.harnex/rules.md` changed — the manifest is still the one step 3
+  committed, recording the *first* change, because this step stands in for the run having
+  been killed right after the rules write and before the manifest write that would follow
+  it.
+- Step 7: the second run completes cleanly, reporting `Written:` with only
+  `.harnex/manifest.json` this time — recognising the rules file already matches what this
+  run would have written and finishing the one write the interruption left undone, rather
+  than refusing it as a hand-edit conflict the way step 4 did. `git status --short`
+  afterwards still shows `.harnex/rules.md` and `.harnex/manifest.json` modified against
+  the step 3 commit — now the second change, both files — and nothing else.

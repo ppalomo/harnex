@@ -48,6 +48,8 @@ Enable it once per clone:
 git config core.hooksPath .githooks
 ```
 
+Cutting a release is a separate, manual step: see [`docs/releasing.md`](docs/releasing.md).
+
 ## Tests
 
 Run the repository's own checks with `uv run --with pytest pytest`. They check the
