@@ -1,0 +1,57 @@
+{
+  "entries": {
+    ".claude/settings.json": {
+      "ask": [
+        "Bash(/bin/rm *)",
+        "Bash(/usr/bin/rm *)",
+        "Bash(bash -c *)",
+        "Bash(cat .env*)",
+        "Bash(dd *)",
+        "Bash(gh pr create *)",
+        "Bash(gh pr merge *)",
+        "Bash(gh release create *)",
+        "Bash(gh repo create *)",
+        "Bash(git * commit *)",
+        "Bash(git * push *)",
+        "Bash(git branch -D *)",
+        "Bash(git branch -d *)",
+        "Bash(git checkout -- *)",
+        "Bash(git clean *)",
+        "Bash(git commit *)",
+        "Bash(git filter-branch *)",
+        "Bash(git filter-repo *)",
+        "Bash(git push *)",
+        "Bash(git rebase *)",
+        "Bash(git remote add *)",
+        "Bash(git remote remove *)",
+        "Bash(git remote set-url *)",
+        "Bash(git reset --hard *)",
+        "Bash(git restore *)",
+        "Bash(mkfs *)",
+        "Bash(printenv *)",
+        "Bash(rm *)",
+        "Bash(rmdir *)",
+        "Bash(sh -c *)",
+        "Bash(sudo *)",
+        "Read(!.env.example)",
+        "Read(!.env.sample)",
+        "Read(*.env)",
+        "Read(.env)",
+        "Read(.env.*)"
+      ],
+      "deny": [
+        "Read(**/*.pem)",
+        "Read(**/id_ed25519)",
+        "Read(**/id_rsa)",
+        "Read(~/.aws/**)",
+        "Read(~/.config/gh/**)",
+        "Read(~/.ssh/**)"
+      ]
+    }
+  },
+  "format": 1,
+  "paths": {
+    ".harnex/rules.md": "da917c20a4ce8a21741dbf69448664fff3f0b8e235f90e6018b2691adb31caf0",
+    ".harnex/state/.gitignore": "ff73664601b6084ee71a6c73e1e9e27f039c023bf6fce320496df7614f8b8365"
+  }
+}

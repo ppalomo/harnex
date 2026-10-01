@@ -263,3 +263,21 @@ def test_profile_changes_re_evaluate_playwright_without_removing_it(
     code, _ = setup_run("write", project, answers)
     assert code == 0
     assert (project / setup.MCP_CONFIG).read_bytes() == before
+
+
+def test_the_env_notice_appears_only_when_jev_is_chosen(
+    project: Path, plugin_root: Path, answers
+) -> None:
+    answers["decision_model"] = "jev"
+    plan = _plan(project, plugin_root, answers)
+    assert any(".env" in notice and "OPENROUTER_API_KEY=" in notice for notice in plan.notices)
+    assert ".env" in setup.render_plan(plan)
+    assert "OPENROUTER_API_KEY=" in setup.render_plan(plan)
+    assert ".env" in setup.plan_as_json(plan)
+    assert "OPENROUTER_API_KEY=" in setup.plan_as_json(plan)
+
+    answers["decision_model"] = "mock"
+    plan = _plan(project, plugin_root, answers)
+    assert not any(".env" in notice for notice in plan.notices)
+    assert ".env" not in setup.render_plan(plan)
+    assert ".env" not in setup.plan_as_json(plan)

@@ -573,6 +573,37 @@ def append_journal(project: Path, entry: dict[str, object]) -> None:
 # --- the command line ---------------------------------------------------------------
 
 
+def resolve_api_key(project: Path) -> str | None:
+    """`OPENROUTER_API_KEY` from the environment first; only then a project-local
+    `.env` at the project root. Never raises: a missing, unreadable, or key-less
+    `.env` resolves to `None`, the same "no key at all" shape as an unset environment."""
+    from_env = os.environ.get("OPENROUTER_API_KEY")
+    if from_env:
+        return from_env
+
+    env_path = project / ".env"
+    try:
+        text = env_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if "=" not in stripped:
+            continue
+        key, _, value = stripped.partition("=")
+        if key.strip() != "OPENROUTER_API_KEY":
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        return value
+
+    return None
+
+
 def _project_backend(project: Path) -> str:
     choices_path = project / setup_script.CHOICES
     if not choices_path.is_file():
@@ -609,7 +640,8 @@ def main(argv: list[str] | None = None) -> int:
         if not isinstance(state, dict):
             raise DecisionError("the state must be a JSON object, keyed by field name")
         backend = _project_backend(project)
-        outcome = decide(question, state, backend, api_key=os.environ.get("OPENROUTER_API_KEY"))
+        key = resolve_api_key(project)
+        outcome = decide(question, state, backend, api_key=key)
     except (DecisionError, setup_script.SetupError, OSError, json.JSONDecodeError) as error:
         print(f"decide: {error}", file=sys.stderr)
         return 1

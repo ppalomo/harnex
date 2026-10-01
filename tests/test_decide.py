@@ -688,6 +688,63 @@ def test_decide_is_a_one_question_call_through_decide_many(tmp_path: Path) -> No
     assert outcome["reason"] == "mock_backend"
 
 
+# --- resolving the API key: environment first, then a project-local .env --------------
+
+
+def test_resolve_api_key_reads_the_environment_when_env_file_is_absent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "from-env")
+    assert decide.resolve_api_key(tmp_path) == "from-env"
+
+
+def test_resolve_api_key_falls_back_to_the_env_file_when_unset(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    (tmp_path / ".env").write_text("OPENROUTER_API_KEY=from-dotenv\n", encoding="utf-8")
+    assert decide.resolve_api_key(tmp_path) == "from-dotenv"
+
+
+def test_resolve_api_key_prefers_the_environment_over_the_env_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("OPENROUTER_API_KEY", "from-env")
+    (tmp_path / ".env").write_text("OPENROUTER_API_KEY=from-dotenv\n", encoding="utf-8")
+    assert decide.resolve_api_key(tmp_path) == "from-env"
+
+
+def test_resolve_api_key_is_none_when_neither_is_present(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    assert decide.resolve_api_key(tmp_path) is None
+
+
+def test_resolve_api_key_is_none_when_the_env_file_does_not_declare_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    (tmp_path / ".env").write_text("SOME_OTHER_KEY=x\n", encoding="utf-8")
+    assert decide.resolve_api_key(tmp_path) is None
+
+
+def test_resolve_api_key_strips_one_matching_pair_of_quotes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    (tmp_path / ".env").write_text('OPENROUTER_API_KEY="from-dotenv"\n', encoding="utf-8")
+    assert decide.resolve_api_key(tmp_path) == "from-dotenv"
+
+
+def test_resolve_api_key_ignores_a_malformed_line_with_no_equals_sign(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    (tmp_path / ".env").write_text("this line has no equals sign\n", encoding="utf-8")
+    assert decide.resolve_api_key(tmp_path) is None
+
+
 # --- the journal -----------------------------------------------------------------------
 
 
@@ -714,6 +771,30 @@ def test_a_resolved_call_journals_its_decision(tmp_path: Path) -> None:
     outcome = decide.parse_response(question, DOCUMENTED_RESPONSE)
     decide.append_journal(project, decide.journal_entry(question, {"phase": "propose"}, outcome))
     entry = json.loads(decide.journal_path(project).read_text(encoding="utf-8").splitlines()[0])
+    assert entry["decision"] == "payments"
+    assert entry["backend"] == "jev"
+
+
+def test_a_call_resolved_with_a_dotenv_key_never_puts_the_key_in_the_journal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A call resolved with a key read from `.env` (the scenario in the decision-model
+    delta spec): the journal must not carry the key's value regardless of source."""
+    question = _question(tmp_path)
+    project = tmp_path / "project"
+    project.mkdir()
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    (project / ".env").write_text("OPENROUTER_API_KEY=super-secret-value\n", encoding="utf-8")
+    key = decide.resolve_api_key(project)
+    assert key == "super-secret-value"
+
+    monkeypatch.setattr(decide, "_post", lambda *a, **k: DOCUMENTED_RESPONSE)
+    outcome = decide.call_jev(question, {"phase": "propose"}, api_key=key)
+    decide.append_journal(project, decide.journal_entry(question, {"phase": "propose"}, outcome))
+
+    journal_text = decide.journal_path(project).read_text(encoding="utf-8")
+    assert "super-secret-value" not in journal_text
+    entry = json.loads(journal_text.splitlines()[0])
     assert entry["decision"] == "payments"
     assert entry["backend"] == "jev"
 

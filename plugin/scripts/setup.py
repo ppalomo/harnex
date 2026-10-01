@@ -47,6 +47,7 @@ STATE_IGNORE = ".harnex/state/.gitignore"
 MANIFEST = ".harnex/manifest.json"
 SETTINGS = ".claude/settings.json"
 MCP_CONFIG = ".mcp.json"
+ENV_FILE = ".env"
 
 PROJECT_PATHS = (AGENTS, CLAUDE, CHOICES, OPENSPEC_CONFIG)
 HARNESS_PATHS = (RULES, STATE_IGNORE)
@@ -631,6 +632,15 @@ def _plan_project_files(
                     ("    " + line).rstrip() for line in pointer.text.rstrip("\n").splitlines()
                 )
             )
+
+    if answers.decision_model == "jev":
+        plan.notices.append(
+            f"{ENV_FILE} at the project root is where the `jev` backend falls back to look "
+            "for the key when the environment variable is unset. It must declare the line "
+            "`OPENROUTER_API_KEY=` followed by the value, and it is the person's own "
+            f"responsibility to keep {ENV_FILE} out of version control. Setup does not "
+            f"read, write, or gitignore {ENV_FILE} itself."
+        )
 
 
 def _plan_harness_files(
