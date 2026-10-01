@@ -11,7 +11,7 @@ sets:
   - code
   - git
   - language
-  - safety
+  # - safety
   - sdd
 features:
 canary: Hullaballoo!

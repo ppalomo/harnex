@@ -26,7 +26,11 @@ from typing import Callable
 
 from generate_floor import load_patterns as _load_pattern_records
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
+import setup as setup_script  # noqa: E402  (a plugin script, reached by path)
 
+
+SAFETY_SET = "safety"
 CommandSegments = list[tuple[str, ...]]
 PatternRecords = list[dict[str, str]]
 DecideRunner = Callable[..., subprocess.CompletedProcess[str]]
@@ -70,7 +74,11 @@ def load_patterns(path: Path | None = None) -> PatternRecords:
 
 
 def classify_segments(
-    segments: CommandSegments, patterns: PatternRecords, agent_type: str | None = None
+    segments: CommandSegments,
+    patterns: PatternRecords,
+    agent_type: str | None = None,
+    *,
+    safety_active: bool = True,
 ) -> Classification:
     """Classify segments against default lists and, optionally, role additions.
 
@@ -79,9 +87,17 @@ def classify_segments(
     over ask regardless of which list matched first.  A role's deny or ask entry can
     further restrict an otherwise allowed default command, but can never grant
     permission.
+
+    ``safety_active=False`` skips the default list's own classification entirely,
+    treating it as an unconditional allow — the project did not choose the `safety` set,
+    or never ran setup.  Role additions are not gated by ``safety_active``: they protect
+    harness state whenever their role runs, independent of a project's own set choices.
     """
-    default_patterns = [record for record in patterns if "agent_type" not in record]
-    default = _classify_against_patterns(segments, default_patterns)
+    if not safety_active:
+        default = Classification("allow")
+    else:
+        default_patterns = [record for record in patterns if "agent_type" not in record]
+        default = _classify_against_patterns(segments, default_patterns)
     if agent_type is None:
         return default
 
@@ -119,19 +135,25 @@ def classify_command(
     is_worktree: bool,
     agent_type: str | None = None,
     run_decide: DecideRunner = subprocess.run,
+    safety_active: bool = True,
 ) -> Classification:
     """Classify one command, asking ``guard.risk`` only for deterministic residue.
 
     ``run_decide`` is a seam for callers' tests; production uses :func:`subprocess.run`.
     The splitter's ambiguous result is residue too, since it must not be silently allowed.
+    ``safety_active`` is the caller's own decision (see ``_safety_enabled``), not computed
+    here, so a direct caller's existing behaviour is unchanged unless it opts in.
     """
     try:
         segments = split_command(command)
-        result = (
-            classify_segments(segments, patterns, agent_type)
-            if segments is not None
-            else Classification("residue")
-        )
+        if segments is not None:
+            result = classify_segments(
+                segments, patterns, agent_type, safety_active=safety_active
+            )
+        elif not safety_active:
+            result = Classification("allow")
+        else:
+            result = Classification("residue")
     except Exception as error:
         result = Classification("ask", reason=f"guard internal error ({error})")
         append_journal(
@@ -481,6 +503,26 @@ def _git_metadata(cwd: Path) -> tuple[str, bool]:
     return branch, resolved(git_dir) != resolved(common_dir)
 
 
+def _safety_enabled(project: Path) -> bool:
+    """Whether the project's own `.harnex.yml` chose the `safety` set.
+
+    Fails safe: a missing `.harnex.yml`, or one that parses but does not list `safety`,
+    makes the default list inert (decision 19, mirroring ``canary.py``'s own check for its
+    set). Anything else — unreadable or malformed — is treated as enabled, since an error
+    is never grounds to allow (the guard's own "never allow on its own error" rule).
+    """
+    choices_path = project / setup_script.CHOICES
+    if not choices_path.is_file():
+        return False
+    try:
+        choices = setup_script.parse_choices(
+            choices_path.read_text(encoding="utf-8"), str(choices_path)
+        )
+    except (OSError, setup_script.SetupError):
+        return True
+    return SAFETY_SET in choices.get("sets", [])
+
+
 def _hook_output(classification: Classification, *, failure: str | None = None) -> dict[str, object]:
     """Translate a guard result into Claude Code's PreToolUse output contract."""
     decision = classification.outcome
@@ -530,6 +572,7 @@ def _classify_hook_payload(raw: str) -> Classification:
         branch=branch,
         is_worktree=is_worktree,
         agent_type=agent_type,
+        safety_active=_safety_enabled(cwd),
     )
 
 

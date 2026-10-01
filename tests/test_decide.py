@@ -135,11 +135,7 @@ def test_score_build_request_includes_every_option_as_criteria(tmp_path: Path) -
             "a.score": {
                 "type": "score",
                 "instructions": "What risk does this command carry?",
-                "criteria": {
-                    "destructive": "The command may cause destructive changes.",
-                    "read_only": "The command only reads state.",
-                    "reversible": "The command makes reversible changes.",
-                },
+                "criteria": ["destructive", "read_only", "reversible"],
             }
         },
     }
@@ -177,11 +173,8 @@ SCORE_RESPONSE = {
         "a.score": {
             "type": "score",
             "score": 0.0,
-            "probabilities": {
-                "destructive": 0.20,
-                "read_only": 0.86,
-                "reversible": 0.90,
-            },
+            "legend": {"0": "destructive", "1": "read_only", "2": "reversible"},
+            "probabilities": {"0": 0.20, "1": 0.86, "2": 0.90},
             "confidence": 0.86,
         }
     },
@@ -200,6 +193,7 @@ def test_score_one_option_crossing_its_threshold_resolves(tmp_path: Path) -> Non
             "read_only": 0.86,
             "reversible": 0.90,
         },
+        # keyed by option name (translated from the response's index/legend shape)
         "confidence": 0.86,
         "backend": "jev",
         "cost_usd": 0.00001,
@@ -213,11 +207,8 @@ def test_score_two_options_crossing_resolves_the_earliest_declared(tmp_path: Pat
             "a.score": {
                 "type": "score",
                 "score": 0.0,
-                "probabilities": {
-                    "destructive": 0.31,
-                    "read_only": 0.99,
-                    "reversible": 0.90,
-                },
+                "legend": {"0": "destructive", "1": "read_only", "2": "reversible"},
+                "probabilities": {"0": 0.31, "1": 0.99, "2": 0.90},
                 "confidence": 0.99,
             }
         },
@@ -226,7 +217,11 @@ def test_score_two_options_crossing_resolves_the_earliest_declared(tmp_path: Pat
     outcome = decide.parse_response(question, response)
     assert outcome["resolved"] is True
     assert outcome["decision"] == "destructive"
-    assert outcome["probabilities"] == response["answers"]["a.score"]["probabilities"]
+    assert outcome["probabilities"] == {
+        "destructive": 0.31,
+        "read_only": 0.99,
+        "reversible": 0.90,
+    }
 
 
 def test_score_with_no_option_crossing_is_unresolved(tmp_path: Path) -> None:
@@ -236,11 +231,8 @@ def test_score_with_no_option_crossing_is_unresolved(tmp_path: Path) -> None:
             "a.score": {
                 "type": "score",
                 "score": 0.0,
-                "probabilities": {
-                    "destructive": 0.29,
-                    "read_only": 0.84,
-                    "reversible": 0.99,
-                },
+                "legend": {"0": "destructive", "1": "read_only", "2": "reversible"},
+                "probabilities": {"0": 0.29, "1": 0.84, "2": 0.99},
                 "confidence": 0.99,
             }
         },
@@ -249,8 +241,46 @@ def test_score_with_no_option_crossing_is_unresolved(tmp_path: Path) -> None:
     outcome = decide.parse_response(question, response)
     assert outcome["resolved"] is False
     assert outcome["reason"] == "below_threshold"
-    assert outcome["probabilities"] == response["answers"]["a.score"]["probabilities"]
+    assert outcome["probabilities"] == {
+        "destructive": 0.29,
+        "read_only": 0.84,
+        "reversible": 0.99,
+    }
     assert "What risk does this command carry?" in outcome["prompt"]
+
+
+def test_score_response_shape_matches_the_live_api_contract(tmp_path: Path) -> None:
+    """Pins the exact shapes recorded live, 2026-10-01, against
+    ``https://openrouter.ai/api/alpha/decisions`` (model ``typesafe/jev-1.13``): a `score`
+    response's `probabilities` are keyed by stringified index, a `legend` maps each index
+    to the criterion sent at that position, and the probabilities sum to 1. Removing
+    `legend` from this fixture must fail with a `KeyError` from `parse_response`, not
+    silently resolve."""
+    question = _score_question(tmp_path)
+    live_response = {
+        "model": "typesafe/jev-1.13-20260917",
+        "answers": {
+            "a.score": {
+                "type": "score",
+                "score": 1.01,
+                "legend": {"0": "destructive", "1": "read_only", "2": "reversible"},
+                "probabilities": {"0": 0, "1": 0.99, "2": 0.01},
+                "confidence": 0.99,
+            }
+        },
+        "usage": {"input_tokens": 337, "output_tokens": 19, "cost": 0.000014154},
+        "id": "gen-dec-1790835852-oFGnXysncDLeUfeO9aBh",
+        "provider": "TypeSafe",
+    }
+    outcome = decide.parse_response(question, live_response)
+    assert outcome["resolved"] is True
+    assert outcome["decision"] == "read_only"
+    assert outcome["probabilities"] == {
+        "destructive": 0,
+        "read_only": 0.99,
+        "reversible": 0.01,
+    }
+    assert sum(outcome["probabilities"].values()) == 1.0
 
 
 def test_score_mock_backend_returns_the_generic_unresolved_outcome(tmp_path: Path) -> None:

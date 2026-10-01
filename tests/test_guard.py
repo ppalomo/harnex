@@ -443,6 +443,24 @@ check_command: make check
 # --- the hook, run as the host runs it -------------------------------------------------
 
 
+def _write_harnex_yml(project: Path, *, sets: list[str]) -> None:
+    """Give a `project` fixture a `.harnex.yml` declaring the given sets, the way a real
+    project's would — just enough for `_safety_enabled` to read, not a full setup run."""
+    rendered_sets = "\n".join(f"  - {name}" for name in sets)
+    (project / ".harnex.yml").write_text(
+        f"""project_name: scratch
+profiles:
+sets:
+{rendered_sets}
+features:
+canary: ""
+decision_model: mock
+check_command: make check
+""",
+        encoding="utf-8",
+    )
+
+
 @pytest.fixture
 def bash_payload(project: Path):
     """Recorded Claude Code PreToolUse input, varied only at the decision point."""
@@ -597,6 +615,9 @@ def _copy_guard_with_hanging_decide(plugin_root: Path, directory: Path) -> Path:
     (scripts / "decide.py").write_text(
         "import time\ntime.sleep(60)\n", encoding="utf-8"
     )
+    real_scripts = plugin_root / "scripts"
+    for name in ("setup.py", "render_rules.py"):
+        shutil.copy2(real_scripts / name, scripts / name)
     return copied_guard / "guard.py"
 
 
@@ -612,6 +633,7 @@ def _assert_no_guard_decision(finished: subprocess.CompletedProcess[str]) -> Non
 def test_pretool_hook_allows_a_read_only_command_from_payload_cwd(
     plugin_root: Path, project: Path, bash_payload
 ) -> None:
+    _write_harnex_yml(project, sets=["safety"])
     finished = _run_guard_hook(
         plugin_root,
         project,
@@ -625,6 +647,7 @@ def test_pretool_hook_allows_a_read_only_command_from_payload_cwd(
 def test_pretool_hook_asks_for_an_ask_pattern(
     plugin_root: Path, project: Path, bash_payload
 ) -> None:
+    _write_harnex_yml(project, sets=["safety"])
     finished = _run_guard_hook(
         plugin_root, project, bash_payload("git push origin main", agent_type="Explore")
     )
@@ -648,6 +671,7 @@ def test_pretool_hook_uses_guard_risk_outcomes(
     risk_outcome: dict[str, object],
     expected: str,
 ) -> None:
+    _write_harnex_yml(project, sets=["safety"])
     sitecustomize = _fake_decide_sitecustomize(tmp_path / "fake-decide", risk_outcome)
     finished = _run_guard_hook(
         plugin_root,
@@ -662,7 +686,9 @@ def test_pretool_hook_uses_guard_risk_outcomes(
 def test_pretool_hook_asks_when_guard_risk_backend_is_unresolved(
     plugin_root: Path, project: Path, bash_payload
 ) -> None:
-    # No .harnex.yml makes decide.py use its real mock backend, which is unresolved.
+    # safety must be active for the default list to reach decide.py at all; an explicit
+    # `decision_model: mock` makes decide.py use its real mock backend, which is unresolved.
+    _write_harnex_yml(project, sets=["safety"])
     finished = _run_guard_hook(
         plugin_root, project, bash_payload("unrecognised-command")
     )
@@ -675,6 +701,7 @@ def test_pretool_hook_asks_when_guard_risk_backend_is_unresolved(
 def test_pretool_hook_asks_on_a_malformed_patterns_fixture(
     tmp_path: Path, plugin_root: Path, project: Path, bash_payload
 ) -> None:
+    _write_harnex_yml(project, sets=["safety"])
     sitecustomize = _malformed_patterns_sitecustomize(tmp_path / "malformed-patterns")
     finished = _run_guard_hook(
         plugin_root,
@@ -726,6 +753,7 @@ def test_pretool_hook_bounds_a_real_hanging_decide_process(
     tmp_path: Path, plugin_root: Path, project: Path, bash_payload
 ) -> None:
     """The inner timeout prevents a real child hang from reaching the host timeout."""
+    _write_harnex_yml(project, sets=["safety"])
     script = _copy_guard_with_hanging_decide(plugin_root, tmp_path / "hanging-decide")
     started = time.monotonic()
     finished = subprocess.run(
@@ -741,6 +769,63 @@ def test_pretool_hook_bounds_a_real_hanging_decide_process(
     _hook_decision(finished, "ask")
     reason = json.loads(finished.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
     assert "backend failure" in reason
+
+
+# --- the default list's own inertness without the project's `safety` set --------------
+
+
+@requires_uv
+def test_pretool_hook_is_inert_without_harnex_yml(
+    plugin_root: Path, project: Path, bash_payload
+) -> None:
+    """No `.harnex.yml` at all: the default list never runs, so an otherwise-ask command
+    allows, and nothing is journalled."""
+    finished = _run_guard_hook(
+        plugin_root, project, bash_payload("git push origin main")
+    )
+    _hook_decision(finished, "allow")
+    assert not (project / ".harnex" / "state" / "guard" / "journal.jsonl").exists()
+
+
+@requires_uv
+def test_pretool_hook_is_inert_without_the_safety_set(
+    plugin_root: Path, project: Path, bash_payload
+) -> None:
+    """`.harnex.yml` present, but `safety` is not among its sets: same inertness as a
+    missing file entirely."""
+    _write_harnex_yml(project, sets=["git"])
+    finished = _run_guard_hook(
+        plugin_root, project, bash_payload("git push origin main")
+    )
+    _hook_decision(finished, "allow")
+    assert not (project / ".harnex" / "state" / "guard" / "journal.jsonl").exists()
+
+
+@requires_uv
+def test_pretool_hook_stays_active_when_harnex_yml_is_malformed(
+    plugin_root: Path, project: Path, bash_payload
+) -> None:
+    """A `.harnex.yml` that cannot be parsed is an error, not a choice: the default list
+    SHALL stay active rather than look like an opt-out."""
+    (project / ".harnex.yml").write_text("not: valid: harnex: yaml: at: all\n", encoding="utf-8")
+    finished = _run_guard_hook(
+        plugin_root, project, bash_payload("git push origin main")
+    )
+    _hook_decision(finished, "ask")
+
+
+@requires_uv
+def test_pretool_hook_role_addition_applies_while_default_list_is_inert(
+    plugin_root: Path, project: Path, bash_payload
+) -> None:
+    """No `.harnex.yml`, so the default list is inert — but a role's own addition
+    (`builder-never-touches-protected-paths`) is not gated by `safety` and still denies."""
+    finished = _run_guard_hook(
+        plugin_root,
+        project,
+        bash_payload("rm -rf openspec/foo", agent_type="builder"),
+    )
+    _hook_decision(finished, "deny")
 
 
 # There is deliberately no malformed-stdout fixture.  ``main()`` catches every runtime
