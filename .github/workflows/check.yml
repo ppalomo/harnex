@@ -1,0 +1,51 @@
+name: check
+
+# Mirrors AGENTS.md's "Before committing" list exactly, so a contributor who only ever
+# ran it by hand sees nothing new required of them (design.md, update-and-release, D5).
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: uv run --with pytest pytest
+        run: uv run --with pytest pytest
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # openspec is distributed as the npm package @fission-ai/openspec (no package.json
+      # in this repo pins it; npx resolves "openspec" from the scoped package's own bin
+      # entry).
+      - name: openspec validate --all
+        run: npx -y @fission-ai/openspec@latest validate --all
+
+      # The Claude Code CLI (@anthropic-ai/claude-code on npm) installs non-interactively,
+      # but whether `claude plugin validate` itself runs without an interactive login in a
+      # bare CI runner cannot be confirmed from this session. AGENTS.md already allows for
+      # its absence ("the manifest check skips itself when the Claude Code CLI is absent"),
+      # so these two steps are best-effort here rather than blocking the workflow: they run
+      # when the CLI install and validation succeed, and are reported, not required, when
+      # they do not.
+      - name: install claude (best-effort)
+        run: npm install -g @anthropic-ai/claude-code
+        continue-on-error: true
+
+      - name: claude plugin validate plugin --strict
+        run: claude plugin validate plugin --strict
+        continue-on-error: true
+
+      - name: claude plugin validate . --strict
+        run: claude plugin validate . --strict
+        continue-on-error: true

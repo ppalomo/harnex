@@ -265,6 +265,86 @@ def test_profile_changes_re_evaluate_playwright_without_removing_it(
     assert (project / setup.MCP_CONFIG).read_bytes() == before
 
 
+def test_update_mode_never_creates_a_missing_project_file(
+    project: Path, plugin_root: Path, answers
+) -> None:
+    plan = setup.build_plan(
+        project,
+        plugin_root,
+        setup.read_answers(json.dumps(answers), plugin_root),
+        mode="update",
+    )
+    step = _step(plan, setup.AGENTS)
+    assert step.action == setup.MISSING
+    assert step.data is None
+    assert any(setup.AGENTS in notice for notice in plan.notices)
+
+
+def _update_plan(project: Path, plugin_root: Path, answers: dict) -> setup.Plan:
+    return setup.build_plan(
+        project, plugin_root, setup.read_answers(json.dumps(answers), plugin_root), mode="update"
+    )
+
+
+def _project_writes(plan: setup.Plan) -> list[setup.Step]:
+    """Every step an `"update"`-mode plan proposes for a project-owned path that would
+    actually write something — the one shape the guarantee says never exists."""
+    return [step for step in plan.steps if step.owner == "project" and step.data is not None]
+
+
+# The general guarantee design.md records for this change: "no Step with owner ==
+# 'project' ever carries data is not None when build_plan runs in 'update' mode" — across
+# more of the survey's own states than the single missing-everything fixture above covers.
+# If 1.1's `mode == "update"` branch is ever reverted or bypassed, the first of these to
+# notice is the one with a project file missing, since that is exactly the state in which
+# the reverted code would fall back to creating it.
+
+
+def test_update_mode_writes_no_project_file_when_nothing_is_present(
+    project: Path, plugin_root: Path, answers
+) -> None:
+    plan = _update_plan(project, plugin_root, answers)
+    assert _project_writes(plan) == []
+    assert all(_step(plan, path).action == setup.MISSING for path in setup.PROJECT_PATHS)
+
+
+def test_update_mode_writes_no_project_file_when_everything_is_present_and_current(
+    project: Path, plugin_root: Path, answers, setup_run
+) -> None:
+    setup_run("write", project, answers)
+    plan = _update_plan(project, plugin_root, answers)
+    assert _project_writes(plan) == []
+    assert all(_step(plan, path).action == setup.KEEP for path in setup.PROJECT_PATHS)
+
+
+def test_update_mode_writes_no_project_file_when_one_project_file_is_missing(
+    project: Path, plugin_root: Path, answers, setup_run
+) -> None:
+    setup_run("write", project, answers)
+    (project / setup.CHOICES).unlink()
+    plan = _update_plan(project, plugin_root, answers)
+    assert _project_writes(plan) == []
+    assert _step(plan, setup.CHOICES).action == setup.MISSING
+    assert all(
+        _step(plan, path).action == setup.KEEP
+        for path in setup.PROJECT_PATHS
+        if path != setup.CHOICES
+    )
+
+
+def test_update_mode_writes_no_project_file_when_a_harness_file_was_edited_by_hand(
+    project: Path, plugin_root: Path, answers, setup_run
+) -> None:
+    """A conflict elsewhere in the plan is no excuse to write a project-owned path: the
+    guarantee holds step by step, not only when the rest of the plan is clean."""
+    setup_run("write", project, answers)
+    (project / setup.RULES).write_text("my own rules\n", encoding="utf-8")
+    plan = _update_plan(project, plugin_root, answers)
+    assert _project_writes(plan) == []
+    assert _step(plan, setup.RULES).action == setup.CONFLICT
+    assert plan.conflicts
+
+
 def test_the_env_notice_appears_only_when_jev_is_chosen(
     project: Path, plugin_root: Path, answers
 ) -> None:

@@ -1,0 +1,94 @@
+name: release
+
+# Reacts to a pushed vX.Y.Z tag; never creates one itself (docs/releasing.md: a person
+# tags by hand, CI only reacts). Re-runs check.yml's own checks against the tagged commit
+# — a tag is not trusted merely because the commit it points to once passed CI earlier
+# (design.md, update-and-release, D5) — then asserts the tag matches both manifests'
+# `version` (D4) before publishing a GitHub release from it.
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: uv run --with pytest pytest
+        run: uv run --with pytest pytest
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # openspec is distributed as the npm package @fission-ai/openspec (no package.json
+      # in this repo pins it; npx resolves "openspec" from the scoped package's own bin
+      # entry).
+      - name: openspec validate --all
+        run: npx -y @fission-ai/openspec@latest validate --all
+
+      # Same best-effort hedge as check.yml: whether `claude plugin validate` runs
+      # without an interactive login in a bare CI runner cannot be confirmed from this
+      # session, and AGENTS.md already allows for its absence.
+      - name: install claude (best-effort)
+        run: npm install -g @anthropic-ai/claude-code
+        continue-on-error: true
+
+      - name: claude plugin validate plugin --strict
+        run: claude plugin validate plugin --strict
+        continue-on-error: true
+
+      - name: claude plugin validate . --strict
+        run: claude plugin validate . --strict
+        continue-on-error: true
+
+      # The one check check.yml does not have: the pushed tag (minus its leading "v")
+      # must equal both manifests' `version`, and the two manifests must agree with each
+      # other. Fails the job (and so blocks the publish step below) on any mismatch.
+      - name: assert tag matches both manifests' version
+        run: |
+          python3 <<'PY'
+          import json
+          import sys
+
+          tag = "${{ github.ref_name }}"
+          version = tag[1:] if tag.startswith("v") else tag
+
+          with open("plugin/.claude-plugin/plugin.json") as f:
+              plugin_version = json.load(f)["version"]
+
+          with open(".claude-plugin/marketplace.json") as f:
+              marketplace_version = json.load(f)["plugins"][0]["version"]
+
+          if plugin_version != marketplace_version:
+              sys.exit(
+                  "manifests disagree: plugin.json version=%r, "
+                  "marketplace.json plugins[0].version=%r"
+                  % (plugin_version, marketplace_version)
+              )
+
+          if version != plugin_version:
+              sys.exit(
+                  "tag %r does not match manifest version %r" % (tag, plugin_version)
+              )
+
+          print("tag %r matches both manifests at version %r" % (tag, plugin_version))
+          PY
+
+      # Only reached if every step above succeeded (a failing step stops the job by
+      # default; the two "best-effort" claude steps above are the sole exception, by
+      # their own continue-on-error). Publishes the GitHub release from the pushed tag.
+      - name: gh release create
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" --title "${{ github.ref_name }}" --generate-notes
