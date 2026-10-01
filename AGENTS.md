@@ -62,3 +62,10 @@ manifest check skips itself when the Claude Code CLI is absent.
 - Nothing under `plugin/` names a project or a private resource.
 - `docs/PLAN.md` still describes the repository as it is; diagrams regenerated if the
   layout or the workflow changed (`python3 docs/diagrams/build.py`).
+
+## Rules
+
+Every agent working in this project follows the rules in `.harnex/rules.md`. Read that file
+before you start, and follow it as if it were written here. It is generated from the rule
+sets recorded in `.harnex.yml`: to change which rules apply, change the sets; to change a
+rule, change it in the harness.

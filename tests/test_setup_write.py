@@ -9,6 +9,7 @@ project. Regenerate them with:
 and read the diff before committing it.
 """
 
+import copy
 import json
 import os
 import shutil
@@ -194,6 +195,52 @@ def test_the_runtime_state_ignores_itself_without_touching_the_project_s_rules(
     (project / ".gitignore").write_text("build/\n", encoding="utf-8")
     setup_run("write", project, answers)
     assert (project / ".gitignore").read_text(encoding="utf-8") == "build/\n"
+
+
+def test_jev_never_touches_env_or_gitignore(
+    tmp_path: Path, answers, setup_run
+) -> None:
+    """The `jev` notice added in `_plan_project_files` is purely informational: it must
+    do no file I/O on `.env` or `.gitignore` at all. A `write` run with `decision_model:
+    jev` writes exactly the same set of paths as a `mock` run, with the same bytes,
+    except for `.harnex.yml` itself, which legitimately differs because it records the
+    choice."""
+    mock_project = tmp_path / "mock-project"
+    jev_project = tmp_path / "jev-project"
+    mock_project.mkdir()
+    jev_project.mkdir()
+
+    mock_answers = copy.deepcopy(answers)
+    jev_answers = copy.deepcopy(answers)
+    jev_answers["decision_model"] = "jev"
+
+    mock_code, mock_said = setup_run("write", mock_project, mock_answers)
+    jev_code, jev_said = setup_run("write", jev_project, jev_answers)
+    assert mock_code == 0 and jev_code == 0
+
+    for project in (mock_project, jev_project):
+        assert not (project / ".env").exists(), "jev must never create a .env file"
+        assert not (project / ".gitignore").exists(), "jev must never create a .gitignore file"
+
+    def written_paths(said: str) -> set[str]:
+        for line in said.splitlines():
+            if line.startswith("Written:"):
+                return {p.strip() for p in line[len("Written:") :].split(",")}
+        return set()
+
+    mock_written = written_paths(mock_said)
+    jev_written = written_paths(jev_said)
+    assert mock_written, "the write actually wrote something to compare"
+    assert mock_written == jev_written, "jev wrote a different set of paths than mock"
+
+    mock_tree = tree(mock_project)
+    jev_tree = tree(jev_project)
+    assert set(mock_tree) == set(jev_tree), "jev left a different file tree than mock"
+    differing = {path for path in mock_tree if mock_tree[path] != jev_tree[path]}
+    assert differing == {setup.CHOICES}, (
+        "the only file whose bytes may differ between a mock and a jev run is "
+        "`.harnex.yml`, which records the decision_model itself"
+    )
 
 
 def test_the_record_holds_a_hash_for_every_path_the_harness_owns(
