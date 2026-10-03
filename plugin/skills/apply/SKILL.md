@@ -16,8 +16,17 @@ The script is at `${CLAUDE_PLUGIN_ROOT}/scripts/apply_loop.py`. Run it with `uv 
 
 ## 1. Which change, and is it ready
 
-If the person named a change, use it. Otherwise look at `openspec/changes/` and ask if
-more than one has an unticked `tasks.md`. Run `openspec status --change <name> --json` —
+Read the project's recorded choices: `.harnex/config.yml` if it exists (`local`
+visibility), otherwise `.harnex.yml`. Under `local` visibility, resolve the store named
+by the recorded `store_id` (`openspec store list --json`, matched by `id`) and keep its
+`root` — every `openspec status` call below takes `--store <store_id>`, and every
+`apply_loop.py` call below takes `--changes-root <that root>`, since `tasks.md` lives
+there, not under this project's own `openspec/`. Under `shared` visibility, skip this and
+use the project's own `openspec/changes/` throughout, exactly as before.
+
+If the person named a change, use it. Otherwise look at the resolved changes directory
+and ask if more than one has an unticked `tasks.md`. Run
+`openspec status --change <name> --json` (with `--store` under local visibility) —
 `apply` needs `tasks` to already be `done` (proposal, specs, design and tasks all exist);
 if it is not, say what is missing and stop, rather than guessing at what the person wants
 built.
@@ -32,7 +41,8 @@ run happens with that branch checked out.
 ## 3. Read the tasks, and route every one of them at once
 
 ```
-uv run "${CLAUDE_PLUGIN_ROOT}/scripts/apply_loop.py" route --project . --change <name>
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/apply_loop.py" route --project . --change <name> \
+    [--changes-root <resolved store root>, local visibility only]
 ```
 
 This reads every unticked task from `tasks.md`, asks `task.route` for all of them
@@ -93,7 +103,8 @@ once, with the same before/after diff as its `changed_paths`:
 
 ```
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/apply_loop.py" scope --project . \
-    --change <name> --task-id <id> --after <after file>
+    --change <name> --task-id <id> --after <after file> \
+    [--changes-root <resolved store root>, local visibility only]
 ```
 
 ### 4.3 Run the check command, and decide whether to accept
@@ -145,7 +156,8 @@ move on to the next task.
 ```
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/apply_loop.py" state-transition --project . \
     --change <name> --task-id <id> --status accepted
-uv run "${CLAUDE_PLUGIN_ROOT}/scripts/apply_loop.py" tick --project . --change <name> --task-id <id>
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/apply_loop.py" tick --project . --change <name> --task-id <id> \
+    [--changes-root <resolved store root>, local visibility only]
 ```
 
 The loop ticks; the builder never does — this is the only place in the whole run

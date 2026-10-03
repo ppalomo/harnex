@@ -17,7 +17,8 @@ Build a small state document:
 {"phase": "verify", "task": "<one paragraph on the implemented change being verified>", "profiles": []}
 ```
 
-`profiles` comes from the project's `.harnex.yml` if it exists (its `profiles` list);
+`profiles` comes from the project's recorded choices — `.harnex/config.yml` if it exists
+(`local` visibility), otherwise `.harnex.yml` — if either exists (its `profiles` list);
 otherwise leave it empty. Then run:
 
 ```
@@ -47,8 +48,11 @@ with the current branch. Keep that exact commit as `<base-ref>` for this whole r
 the same base-commit concept `review` uses: do not use `HEAD`, a remote tip, or a different
 base for the diff, facts, or review record.
 
-Confirm `openspec/changes/<change-name>/` exists before proceeding. If it does not, say so
-plainly and stop rather than guessing the change path.
+Confirm the change's own directory exists before proceeding: `openspec/changes/<change-name>/`
+under `shared` visibility, or, under `local` visibility, the same path under the store
+named by the recorded `store_id` (resolve it the same way `apply`'s step 1 does —
+`openspec store list --json`, matched by `id`). If it does not exist, say so plainly and
+stop rather than guessing the change path.
 
 Run the script, capturing stdout, stderr, and its exit status separately:
 

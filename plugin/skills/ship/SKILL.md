@@ -17,8 +17,14 @@ Name the change from the current branch:
 git branch --show-current
 ```
 
-Use that branch name as `<change-name>`. Confirm `openspec/changes/<change-name>/` exists;
-if it does not, say so plainly and stop rather than guessing the change path. Run the gate,
+Use that branch name as `<change-name>`. Read the project's recorded choices
+(`.harnex/config.yml` if it exists — `local` visibility — otherwise `.harnex.yml`); under
+`local` visibility, resolve the store named by the recorded `store_id`
+(`openspec store list --json`, matched by `id`) and read `proposal.md` and run
+`openspec archive` against it below, passing `--store <store_id>`. Confirm the change's
+own directory exists — `openspec/changes/<change-name>/`, under the project or, under
+`local` visibility, under that store's own root; if it does not, say so plainly and stop
+rather than guessing the change path. Run the gate,
 capturing its stdout, stderr, and exit status separately because a refusal exits non-zero
 while still printing its result:
 
@@ -67,7 +73,8 @@ If its output is empty, the tree is already clean relative to `HEAD`. This is no
 re-running after a pull-request failure: skip the commit step and proceed to step 4. If it
 has output, continue with the commit.
 
-Read `openspec/changes/<change-name>/proposal.md` and use it to derive a conventional,
+Read `proposal.md` (resolved in step 1 — the project's own `openspec/changes/<change-name>/`
+under `shared` visibility, the store's under `local`) and use it to derive a conventional,
 English commit message. Check the repository's recent style before committing:
 
 ```
@@ -134,9 +141,11 @@ Only after `gh pr create` succeeds, run:
 openspec archive <change-name> --yes --json
 ```
 
-This command archives the change and, by default, updates the main specs from its delta
-specs; do not use `--skip-specs`. If it fails, report the archive-and-spec-sync failure
-plainly. The commit, push, and pull request already happened and stand.
+Add `--store <store_id>` under `local` visibility (step 1's resolved id) — the change
+archives into that store's own `openspec/specs/`, never into this project's. This command
+archives the change and, by default, updates the main specs from its delta specs; do not
+use `--skip-specs`. If it fails, report the archive-and-spec-sync failure plainly. The
+commit, push, and pull request already happened and stand.
 
 ## 7. Finish
 

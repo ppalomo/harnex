@@ -76,7 +76,7 @@ def project(tmp_path: Path) -> Path:
 def setup_run(tmp_path: Path, plugin_root: Path):
     """Run the script the way its command line does, and return what it said."""
 
-    def run(verb: str, project: Path, answers: dict, *, as_json: bool = False):
+    def run(verb: str, project: Path, answers: dict, *, as_json: bool = False, home: Path | None = None):
         document = tmp_path / "answers.json"
         document.write_text(json.dumps(answers), encoding="utf-8")
         argv = [
@@ -90,6 +90,8 @@ def setup_run(tmp_path: Path, plugin_root: Path):
         ]
         if as_json:
             argv.append("--json")
+        if home is not None:
+            argv += ["--home", str(home)]
         out, err = io.StringIO(), io.StringIO()
         with redirect_stdout(out), redirect_stderr(err):
             code = setup_script.main(argv)

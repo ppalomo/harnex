@@ -50,8 +50,18 @@ SETTINGS = ".claude/settings.json"
 MCP_CONFIG = ".mcp.json"
 ENV_FILE = ".env"
 
+# Local visibility (docs/PLAN.md C7): nothing below is created, read or merged unless
+# `answers.visibility == "local"`. Shared visibility above is untouched by any of it.
+CLAUDE_LOCAL = "CLAUDE.local.md"
+LOCAL_CHOICES = ".harnex/config.yml"
+HARNEX_IGNORE = ".harnex/.gitignore"
+GIT_EXCLUDE = ".git/info/exclude"
+SETTINGS_LOCAL = ".claude/settings.local.json"
+GLOBAL_SETTINGS = ".claude/settings.json"  # resolved against `home`, not `project`
+
 PROJECT_PATHS = (AGENTS, CLAUDE, CHOICES, OPENSPEC_CONFIG)
 HARNESS_PATHS = (RULES, STATE_IGNORE)
+LOCAL_HARNESS_PATHS = (RULES, HARNEX_IGNORE, CLAUDE_LOCAL)
 
 # The answers, in the order they are written. The names are fixed by the plan.
 ANSWER_KEYS = (
@@ -63,14 +73,40 @@ ANSWER_KEYS = (
     "decision_model",
     "check_command",
 )
+# `.harnex/config.yml`'s own shape, local visibility only (design.md D2): the same seven
+# plus the three local-visibility answers. A new file, not a rename of `.harnex.yml` —
+# `.harnex.yml`'s own shape (above) is not reopened.
+LOCAL_ANSWER_KEYS = ANSWER_KEYS + ("visibility", "tools", "store_id")
 LIST_KEYS = ("profiles", "sets", "features")
+LOCAL_LIST_KEYS = LIST_KEYS + ("tools",)
 DECISION_BACKENDS = ("mock", "jev")
+VISIBILITIES = ("shared", "local")
+# The builder role's own two bindings (docs/PLAN.md §4) — the only role with a choice of
+# tool, so the only one local visibility's guided question asks about by name.
+BUILDER_TOOLS = ("claude", "codex")
 
 STATE_IGNORE_BODY = """\
 # Runtime state the harness writes while it works: decision journal, apply run state.
 # It ignores itself so that the project's own ignore file is never touched.
 *
 """
+
+HARNEX_IGNORE_BODY = """\
+# Local visibility (docs/PLAN.md C7): everything in this directory is personal to this
+# machine — your answers, the rendered rules, the generation record, runtime state. It
+# ignores itself, the same way `.harnex/state/` already does under shared visibility, so
+# that the project's own ignore file is never touched.
+*
+"""
+
+CLAUDE_LOCAL_BODY_MARKER = "@.harnex/rules.md"
+
+CODEX_LOCAL_NOTICE = (
+    "Codex is among the active tools, but under local visibility it cannot see this "
+    "project's rules: the Codex builder binding reads them from `AGENTS.md`, which "
+    "local visibility never touches. Codex is not blocked — it will still build — it "
+    "simply will not have read the rules first."
+)
 
 MANIFEST_FORMAT = 1
 FLOOR_FORMAT = 1
@@ -121,10 +157,19 @@ class Answers:
     pointer_claude: bool = False
     mcp_playwright: bool = False
     adopt: tuple[str, ...] = ()
+    # Local visibility (docs/PLAN.md C7). `visibility`/`tools`/`store_id` are answers,
+    # like the seven above, but recorded in `.harnex/config.yml`, never in `.harnex.yml`
+    # (design.md D2) — so they are not in `as_choices()`. `global_instructions` is an
+    # approval, like `pointer_agents`, not a recorded answer at all.
+    visibility: str = "shared"
+    tools: tuple[str, ...] = ()
+    store_id: str = ""
+    global_instructions: bool = False
 
     def as_choices(self) -> dict[str, object]:
-        """Only the seven the project records; the approvals are this run's, not the
-        project's."""
+        """Only the seven `.harnex.yml` records; the approvals are this run's, not the
+        project's, and local visibility's own answers belong to `.harnex/config.yml`
+        instead (`as_local_choices`)."""
         return {
             "project_name": self.project_name,
             "profiles": list(self.profiles),
@@ -134,6 +179,15 @@ class Answers:
             "decision_model": self.decision_model,
             "check_command": self.check_command,
         }
+
+    def as_local_choices(self) -> dict[str, object]:
+        """The ten `.harnex/config.yml` records: the same seven, plus local visibility's
+        own three."""
+        choices = self.as_choices()
+        choices["visibility"] = self.visibility
+        choices["tools"] = list(self.tools)
+        choices["store_id"] = self.store_id
+        return choices
 
 
 def available_sets(plugin_root: Path) -> list[str]:
@@ -188,7 +242,8 @@ def read_answers(text: str, plugin_root: Path) -> Answers:
     approvals = raw.get("approvals", {})
     if not isinstance(approvals, dict):
         raise SetupError("`approvals` must be an object")
-    unknown_keys = sorted(set(raw) - set(ANSWER_KEYS) - {"approvals"})
+    local_keys = {"visibility", "tools", "store_id"}
+    unknown_keys = sorted(set(raw) - set(ANSWER_KEYS) - local_keys - {"approvals"})
     if unknown_keys:
         raise SetupError(
             f"the answers name what the harness does not ask for: {', '.join(unknown_keys)}"
@@ -207,6 +262,16 @@ def read_answers(text: str, plugin_root: Path) -> Answers:
                 raise SetupError(f"`{key}` must be text")
             values[key] = value
 
+    visibility = raw.get("visibility", "shared")
+    if not isinstance(visibility, str):
+        raise SetupError("`visibility` must be text")
+    tools_raw = raw.get("tools", [])
+    if not isinstance(tools_raw, list) or any(not isinstance(v, str) for v in tools_raw):
+        raise SetupError("`tools` must be a list of names")
+    store_id = raw.get("store_id", "")
+    if not isinstance(store_id, str):
+        raise SetupError("`store_id` must be text")
+
     answers = Answers(
         project_name=str(values["project_name"]),
         profiles=tuple(values["profiles"]),  # type: ignore[arg-type]
@@ -219,6 +284,10 @@ def read_answers(text: str, plugin_root: Path) -> Answers:
         pointer_claude=bool(approvals.get("pointer_claude", False)),
         mcp_playwright=bool(approvals.get("mcp_playwright", False)),
         adopt=tuple(approvals.get("adopt", ()) or ()),
+        visibility=visibility,
+        tools=tuple(tools_raw),
+        store_id=store_id,
+        global_instructions=bool(approvals.get("global_instructions", False)),
     )
     validate_answers(answers, plugin_root)
     return answers
@@ -261,8 +330,35 @@ def validate_answers(answers: Answers, plugin_root: Path) -> None:
             "a canary word is recorded but the `canary` set was not chosen; "
             "the word would be read by nothing"
         )
+    if answers.visibility not in VISIBILITIES:
+        raise SetupError(
+            f"`visibility` is `{answers.visibility}`; it must be one of "
+            f"{', '.join(VISIBILITIES)}"
+        )
+    unknown_tools = sorted(set(answers.tools) - set(BUILDER_TOOLS))
+    if unknown_tools:
+        raise SetupError(
+            f"no such tool: {', '.join(unknown_tools)}. The harness holds: "
+            f"{', '.join(BUILDER_TOOLS)}."
+        )
+    if answers.tools and answers.visibility != "local":
+        raise SetupError(
+            "`tools` is answered but `visibility` is not `local`; it would be read by "
+            "nothing"
+        )
+    if answers.visibility == "local" and not answers.store_id.strip():
+        raise SetupError(
+            "`visibility` is `local`, so a local OpenSpec store must already be "
+            "resolved — register one with `openspec store setup` and pass its id as "
+            "`store_id` before planning or writing"
+        )
+    if answers.visibility != "local" and answers.store_id.strip():
+        raise SetupError(
+            "`store_id` is answered but `visibility` is not `local`; it would be read "
+            "by nothing"
+        )
     for path in answers.adopt:
-        if path not in HARNESS_PATHS:
+        if path not in HARNESS_PATHS and path not in LOCAL_HARNESS_PATHS:
             raise SetupError(f"{path} is not a path the harness owns, so it cannot adopt it")
 
 
@@ -274,6 +370,8 @@ def choices_on_offer(plugin_root: Path) -> dict[str, object]:
         "features": available_features(plugin_root),
         "decision_models": list(DECISION_BACKENDS),
         "default_canary": DEFAULT_CANARY,
+        "visibilities": list(VISIBILITIES),
+        "tools": list(BUILDER_TOOLS),
     }
 
 
@@ -284,8 +382,18 @@ _LIST_HEAD = re.compile(r"^([a-z][a-z_]*):\s*$")
 _LIST_ITEM = re.compile(r"^ +- +(\S.*?)\s*$")
 
 
-def parse_choices(text: str, path: str = CHOICES) -> dict[str, object]:
-    """The reader is the schema: what it does not understand, it refuses, with the line."""
+def parse_choices(
+    text: str,
+    path: str = CHOICES,
+    keys: tuple[str, ...] = ANSWER_KEYS,
+    list_keys: tuple[str, ...] = LIST_KEYS,
+) -> dict[str, object]:
+    """The reader is the schema: what it does not understand, it refuses, with the line.
+
+    `keys`/`list_keys` default to `.harnex.yml`'s own shape; `.harnex/config.yml` (local
+    visibility, design.md D2) passes `LOCAL_ANSWER_KEYS`/`LOCAL_LIST_KEYS` instead — the
+    line-level grammar is the same flat shape either way.
+    """
     values: dict[str, object] = {}
     current: str | None = None
     for number, line in enumerate(text.splitlines(), start=1):
@@ -316,13 +424,13 @@ def parse_choices(text: str, path: str = CHOICES) -> dict[str, object]:
             "The file is flat on purpose."
         )
 
-    unknown = sorted(set(values) - set(ANSWER_KEYS))
+    unknown = sorted(set(values) - set(keys))
     if unknown:
         raise SetupError(f"{path}: unknown key {', '.join(unknown)}")
-    missing = [key for key in ANSWER_KEYS if key not in values]
+    missing = [key for key in keys if key not in values]
     if missing:
         raise SetupError(f"{path}: missing {', '.join(missing)}")
-    for key in LIST_KEYS:
+    for key in list_keys:
         if not isinstance(values[key], list):
             raise SetupError(f"{path}: `{key}` must be a list")
     return values
@@ -339,15 +447,24 @@ def _unquote(value: str) -> str:
     return value
 
 
-def format_choices(answers: Answers) -> str:
+def _format_flat(choices: dict[str, object]) -> str:
     lines: list[str] = []
-    for key, value in answers.as_choices().items():
+    for key, value in choices.items():
         if isinstance(value, list):
             lines.append(f"{key}:")
             lines.extend(f"  - {item}" for item in value)
         else:
             lines.append(f"{key}: {value}" if value != "" else f"{key}: \"\"")
     return "\n".join(lines) + "\n"
+
+
+def format_choices(answers: Answers) -> str:
+    return _format_flat(answers.as_choices())
+
+
+def format_local_choices(answers: Answers) -> str:
+    """`.harnex/config.yml`'s own shape (design.md D2) — the same flat format, ten keys."""
+    return _format_flat(answers.as_local_choices())
 
 
 # --- templates and the pointer lines ------------------------------------------------
@@ -551,8 +668,17 @@ def build_plan(
     plugin_root: Path,
     answers: Answers,
     mode: Literal["setup", "update"] = "setup",
+    home: Path | None = None,
 ) -> Plan:
-    """Survey every path, classify it by its content, and say what would happen to it."""
+    """Survey every path, classify it by its content, and say what would happen to it.
+
+    `home` only matters under local visibility (design.md D7's one global offer); it
+    defaults to the real home directory and exists as a parameter purely so a test can
+    stand a `tmp_path` in for it instead.
+    """
+    if answers.visibility == "local":
+        return _build_local_plan(project, plugin_root, answers, mode, home or Path.home())
+
     plan = Plan(project=project)
     record = read_manifest(project)
     recorded_paths: dict[str, str] = dict(record["paths"]) if record else {}  # type: ignore[arg-type]
@@ -653,6 +779,10 @@ def _plan_project_files(
                 )
             )
 
+    _maybe_jev_notice(plan, answers)
+
+
+def _maybe_jev_notice(plan: Plan, answers: Answers) -> None:
     if answers.decision_model == "jev":
         plan.notices.append(
             f"{ENV_FILE} at the project root is where the `jev` backend falls back to look "
@@ -699,21 +829,30 @@ def _plan_harness_files(
 
 
 def _plan_settings(
-    plan: Plan, project: Path, plugin_root: Path, record: dict[str, object] | None
+    plan: Plan,
+    project: Path,
+    plugin_root: Path,
+    record: dict[str, object] | None,
+    *,
+    target: str = SETTINGS,
+    owner: str = "shared",
 ) -> dict[str, list[str]]:
+    """Merge the permission floor into `target` (`.claude/settings.json`, shared, or —
+    under local visibility — `.claude/settings.local.json`, design.md D3), entry by
+    entry, the same way either file is merged."""
     floor = load_floor(plugin_root)
     wanted: dict[str, list[str]] = {"deny": [], "ask": []}
     for entry in floor:
         wanted[entry.list_name].append(entry.pattern)
 
-    path = project / SETTINGS
+    path = project / target
     current = _read(path)
     if current is None:
         merged = {"permissions": {"deny": list(wanted["deny"]), "ask": list(wanted["ask"])}}
         plan.steps.append(
             Step(
-                SETTINGS,
-                "shared",
+                target,
+                owner,
                 CREATE,
                 f"{len(wanted['deny']) + len(wanted['ask'])} floor entries",
                 _settings_bytes(merged),
@@ -724,41 +863,41 @@ def _plan_settings(
     try:
         settings = json.loads(current.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError) as error:
-        plan.steps.append(Step(SETTINGS, "shared", CONFLICT, "cannot be read as JSON"))
+        plan.steps.append(Step(target, owner, CONFLICT, "cannot be read as JSON"))
         plan.conflicts.append(
-            f"{SETTINGS} cannot be read as JSON ({error}). The floor is merged entry by "
+            f"{target} cannot be read as JSON ({error}). The floor is merged entry by "
             "entry, never as text, so the file has to be readable first."
         )
         return {"deny": [], "ask": []}
     if not isinstance(settings, dict):
-        plan.steps.append(Step(SETTINGS, "shared", CONFLICT, "is not an object"))
-        plan.conflicts.append(f"{SETTINGS} is not a JSON object, so it holds no entries to merge.")
+        plan.steps.append(Step(target, owner, CONFLICT, "is not an object"))
+        plan.conflicts.append(f"{target} is not a JSON object, so it holds no entries to merge.")
         return {"deny": [], "ask": []}
 
     merged = json.loads(json.dumps(settings))
     permissions = merged.setdefault("permissions", {})
     if not isinstance(permissions, dict):
-        plan.steps.append(Step(SETTINGS, "shared", CONFLICT, "`permissions` is not an object"))
-        plan.conflicts.append(f"{SETTINGS}: `permissions` is not an object.")
+        plan.steps.append(Step(target, owner, CONFLICT, "`permissions` is not an object"))
+        plan.conflicts.append(f"{target}: `permissions` is not an object.")
         return {"deny": [], "ask": []}
 
     added: dict[str, list[str]] = {"deny": [], "ask": []}
     for name, patterns in wanted.items():
         existing = permissions.setdefault(name, [])
         if not isinstance(existing, list):
-            plan.steps.append(Step(SETTINGS, "shared", CONFLICT, f"`permissions.{name}` is not a list"))
-            plan.conflicts.append(f"{SETTINGS}: `permissions.{name}` is not a list of entries.")
+            plan.steps.append(Step(target, owner, CONFLICT, f"`permissions.{name}` is not a list"))
+            plan.conflicts.append(f"{target}: `permissions.{name}` is not a list of entries.")
             return {"deny": [], "ask": []}
         for pattern in patterns:
             if pattern not in existing:
                 existing.append(pattern)
                 added[name].append(pattern)
 
-    _notice_overlaps(plan, permissions, wanted)
-    _notice_bypass(plan, permissions)
+    _notice_overlaps(plan, permissions, wanted, target)
+    _notice_bypass(plan, permissions, target)
 
     previously: dict[str, list[str]] = {"deny": [], "ask": []}
-    kept = record["entries"].get(SETTINGS, {}) if record else {}  # type: ignore[union-attr]
+    kept = record["entries"].get(target, {}) if record else {}  # type: ignore[union-attr]
     for name in previously:
         previously[name] = [p for p in kept.get(name, []) if p in permissions.get(name, [])]
 
@@ -773,12 +912,12 @@ def _plan_settings(
     }
 
     if merged == settings:
-        plan.steps.append(Step(SETTINGS, "shared", UNCHANGED, "the floor is already there"))
+        plan.steps.append(Step(target, owner, UNCHANGED, "the floor is already there"))
     else:
         plan.steps.append(
             Step(
-                SETTINGS,
-                "shared",
+                target,
+                owner,
                 MERGE,
                 f"{len(added['deny']) + len(added['ask'])} floor entries added, "
                 f"every other entry kept",
@@ -889,7 +1028,9 @@ def _plan_mcp(
     return {}
 
 
-def _notice_overlaps(plan: Plan, permissions: dict[str, object], wanted: dict[str, list[str]]) -> None:
+def _notice_overlaps(
+    plan: Plan, permissions: dict[str, object], wanted: dict[str, list[str]], target: str = SETTINGS
+) -> None:
     allows = permissions.get("allow", [])
     if not isinstance(allows, list):
         return
@@ -902,7 +1043,7 @@ def _notice_overlaps(plan: Plan, permissions: dict[str, object], wanted: dict[st
         _, spec = _split_rule(allow)
         breadth = "covers every use of the tool" if spec in (None, "*") else "covers"
         plan.notices.append(
-            f"{SETTINGS}: your allow entry `{allow}` {breadth} "
+            f"{target}: your allow entry `{allow}` {breadth} "
             f"{len(met)} floor entr{'y' if len(met) == 1 else 'ies'}, such as `{met[0]}`. "
             "The host resolves deny, then ask, then allow, and a more specific allow does "
             "not carve an exception out of either, so the floor still applies and your "
@@ -910,14 +1051,255 @@ def _notice_overlaps(plan: Plan, permissions: dict[str, object], wanted: dict[st
         )
 
 
-def _notice_bypass(plan: Plan, permissions: dict[str, object]) -> None:
+def _notice_bypass(plan: Plan, permissions: dict[str, object], target: str = SETTINGS) -> None:
     mode = permissions.get("defaultMode")
     if isinstance(mode, str) and mode in BYPASS_MODES:
         plan.notices.append(
-            f"{SETTINGS}: `permissions.defaultMode` is `{mode}`, which bypasses permissions "
+            f"{target}: `permissions.defaultMode` is `{mode}`, which bypasses permissions "
             "altogether. The floor is written, and in that mode nothing of it is in force. "
             "No harness can defend against it."
         )
+
+
+# --- local visibility (docs/PLAN.md C7): every path below, project-prefixed or not,
+# is local-visibility-only and leaves `shared` visibility (above) untouched -------------
+
+
+def _plan_local_entry_files(plan: Plan, project: Path) -> None:
+    """`AGENTS.md`/`CLAUDE.md` are reported, never touched (project-setup's own MODIFIED
+    requirement) — every surveyed path appears in the plan, even one the command will
+    never write, per the unmodified "Setup prints a plan, one line per path" requirement.
+    """
+    for path in (AGENTS, CLAUDE):
+        current = _read(project / path)
+        detail = (
+            "the project's own; local visibility never touches it"
+            if current is not None
+            else "absent; local visibility never creates it"
+        )
+        plan.steps.append(Step(path, "project", KEEP, detail))
+
+
+def _plan_local_config(
+    plan: Plan, project: Path, plugin_root: Path, answers: Answers, mode: str
+) -> None:
+    """`.harnex/config.yml`, local visibility's own answers file (design.md D2) — created
+    once, from the template, exactly like `.harnex.yml` under `shared` visibility, and
+    never rewritten afterward."""
+    current = _read(project / LOCAL_CHOICES)
+    if current is None:
+        if mode == "update":
+            plan.steps.append(
+                Step(LOCAL_CHOICES, "project", MISSING, f"{LOCAL_CHOICES} is missing; setup creates it")
+            )
+            plan.notices.append(
+                f"{LOCAL_CHOICES} is missing. Update never creates a project-owned file; "
+                "run setup to create it."
+            )
+        else:
+            body = render_template(
+                plugin_root, "local-config.yml", {"keys": format_local_choices(answers).rstrip("\n")}
+            )
+            plan.steps.append(
+                Step(LOCAL_CHOICES, "project", CREATE, "from the harness's template", body.encode("utf-8"))
+            )
+    else:
+        plan.steps.append(Step(LOCAL_CHOICES, "project", KEEP, "the project's own, left alone"))
+
+    _maybe_jev_notice(plan, answers)
+
+
+# Every local-visibility path that cannot live inside a self-ignoring directory
+# (`.harnex/`'s own) — so each needs its own `.git/info/exclude` entry instead.
+GIT_EXCLUDE_PATHS = (CLAUDE_LOCAL, SETTINGS_LOCAL)
+
+
+def _plan_git_exclude(plan: Plan, project: Path) -> None:
+    """Keep every root-level local-visibility path out of git without ever touching the
+    project's own ignore file (local-visibility spec: "a path that cannot live inside [a
+    self-ignoring directory]... excluded through an entry the harness adds to
+    `.git/info/exclude`")."""
+    if not (project / ".git").is_dir():
+        plan.steps.append(Step(GIT_EXCLUDE, "local", CONFLICT, "no .git directory here"))
+        plan.conflicts.append(
+            f"Local visibility excludes {', '.join(GIT_EXCLUDE_PATHS)} through "
+            f"{GIT_EXCLUDE}, which needs a git repository. Run `git init` first, or "
+            "choose `shared` visibility."
+        )
+        return
+
+    exclude_path = project / GIT_EXCLUDE
+    current = _read(exclude_path)
+    text = current.decode("utf-8", errors="replace") if current is not None else ""
+    existing = set(text.splitlines())
+    missing = [path for path in GIT_EXCLUDE_PATHS if path not in existing]
+    if not missing:
+        plan.steps.append(
+            Step(GIT_EXCLUDE, "local", UNCHANGED, f"{', '.join(GIT_EXCLUDE_PATHS)} already excluded")
+        )
+        return
+
+    new_text = text if (not text or text.endswith("\n")) else text + "\n"
+    new_text += "".join(f"{path}\n" for path in missing)
+    action = CREATE if current is None else UPDATE
+    plan.steps.append(
+        Step(
+            GIT_EXCLUDE,
+            "local",
+            action,
+            f"{', '.join(missing)} added to the repository's own local exclude list",
+            new_text.encode("utf-8"),
+        )
+    )
+
+
+def _plan_local_mcp_notice(plan: Plan, plugin_root: Path, answers: Answers) -> None:
+    """No file is written for an MCP entry under local visibility (design.md D4) — just
+    the exact command to run, the same "show, write only after yes" discipline, carried
+    out by the skill rather than by this script."""
+    if not any(profile in ui_profiles(plugin_root) for profile in answers.profiles):
+        return
+    plan.steps.append(Step(MCP_CONFIG, "local", KEEP, "local visibility never writes .mcp.json"))
+    plan.notices.append(
+        f"A UI profile is chosen. Under local visibility the Playwright MCP entry is "
+        f"never written to {MCP_CONFIG}; register it locally instead, after your yes:\n"
+        "    claude mcp add playwright --scope local -- npx @playwright/mcp@latest"
+    )
+
+
+def _plan_local_store(plan: Plan, answers: Answers) -> None:
+    """No file inside the project names the store (design.md D5) — this is purely the
+    plan's own transparency line, the same "every surveyed path says what happens to it"
+    principle extended to the one piece of local visibility that lives outside any path
+    at all."""
+    plan.steps.append(
+        Step(
+            "openspec store",
+            "local",
+            UNCHANGED,
+            f"this project's own propose/apply/verify/ship work uses store "
+            f"`{answers.store_id}`",
+        )
+    )
+
+
+_INSTRUCTION_FILES_TARGET = "claude-md-and-agents-md"
+
+
+def _plan_global_instructions(plan: Plan, home: Path, answers: Answers) -> None:
+    """The one-time, machine-wide offer local visibility depends on (design.md D7):
+    without it, a project's own `CLAUDE.local.md` stops Claude Code from reading that
+    project's `AGENTS.md`. Never offered under `shared` visibility, and never written
+    without the person's own explicit yes."""
+    path = home / GLOBAL_SETTINGS
+    label = str(path)
+    current = _read(path)
+    settings: dict[str, object] = {}
+    if current is not None:
+        try:
+            settings = json.loads(current.decode("utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as error:
+            plan.steps.append(Step(label, "home", CONFLICT, "cannot be read as JSON"))
+            plan.conflicts.append(f"{label} cannot be read as JSON ({error}).")
+            return
+        if not isinstance(settings, dict):
+            plan.steps.append(Step(label, "home", CONFLICT, "is not an object"))
+            plan.conflicts.append(f"{label} is not a JSON object.")
+            return
+
+    plugin_configs = settings.get("pluginConfigs", {})
+    if not isinstance(plugin_configs, dict):
+        plan.steps.append(Step(label, "home", CONFLICT, "`pluginConfigs` is not an object"))
+        plan.conflicts.append(f"{label}: `pluginConfigs` is not an object.")
+        return
+    agents_md = plugin_configs.get("agents-md@builtin", {})
+    if not isinstance(agents_md, dict):
+        plan.steps.append(Step(label, "home", CONFLICT, "`pluginConfigs.\"agents-md@builtin\"` is not an object"))
+        plan.conflicts.append(f'{label}: `pluginConfigs."agents-md@builtin"` is not an object.')
+        return
+    options = agents_md.get("options", {})
+    if not isinstance(options, dict):
+        plan.steps.append(Step(label, "home", CONFLICT, "...options is not an object"))
+        plan.conflicts.append(f'{label}: `pluginConfigs."agents-md@builtin".options` is not an object.')
+        return
+
+    if options.get("instructionFiles") == _INSTRUCTION_FILES_TARGET:
+        plan.steps.append(
+            Step(label, "home", UNCHANGED, "AGENTS.md already keeps loading alongside CLAUDE.local.md")
+        )
+        return
+
+    if not answers.global_instructions:
+        plan.steps.append(Step(label, "home", KEEP, "not yet approved this run"))
+        plan.notices.append(
+            f"{label}: without `pluginConfigs.\"agents-md@builtin\".options.instructionFiles` "
+            f'set to "{_INSTRUCTION_FILES_TARGET}", this project\'s own {CLAUDE_LOCAL} will '
+            "stop Claude Code from reading its AGENTS.md (projects with no CLAUDE.md of "
+            "their own). This is a one-time, machine-wide setting, not specific to this "
+            "project — approve it once and every project benefits. Declining leaves this "
+            f"project's {AGENTS} unread the moment {CLAUDE_LOCAL} exists, and this notice "
+            "returns on every later run until the setting is there."
+        )
+        return
+
+    merged = copy.deepcopy(settings)
+    merged.setdefault("pluginConfigs", {})
+    merged["pluginConfigs"].setdefault("agents-md@builtin", {})
+    merged["pluginConfigs"]["agents-md@builtin"].setdefault("options", {})
+    merged["pluginConfigs"]["agents-md@builtin"]["options"]["instructionFiles"] = _INSTRUCTION_FILES_TARGET
+    plan.steps.append(
+        Step(
+            label,
+            "home",
+            MERGE,
+            "instructionFiles set so AGENTS.md keeps loading alongside CLAUDE.local.md",
+            _settings_bytes(merged),
+        )
+    )
+
+
+def _build_local_plan(
+    project: Path,
+    plugin_root: Path,
+    answers: Answers,
+    mode: Literal["setup", "update"],
+    home: Path,
+) -> Plan:
+    """Local visibility's own plan (docs/PLAN.md C7, design.md): every path either lives
+    inside a self-ignoring directory, is excluded through `.git/info/exclude`, or — for
+    the floor and the one global offer — is a file this script already knows how to merge,
+    just at a different target. `AGENTS.md`, `CLAUDE.md`, `openspec/config.yaml`,
+    `.claude/settings.json` and `.mcp.json` are never written by any of it."""
+    plan = Plan(project=project)
+    record = read_manifest(project)
+    recorded_paths: dict[str, str] = dict(record["paths"]) if record else {}  # type: ignore[arg-type]
+
+    rules = render_rules.render(
+        list(answers.sets), list(answers.profiles), plugin_root / "context" / "rules"
+    ).encode("utf-8")
+    claude_local = render_template(plugin_root, CLAUDE_LOCAL, {})
+    desired = {
+        RULES: rules,
+        HARNEX_IGNORE: HARNEX_IGNORE_BODY.encode("utf-8"),
+        CLAUDE_LOCAL: claude_local.encode("utf-8"),
+    }
+    why = {
+        RULES: "rendered from the sets the project chose",
+        HARNEX_IGNORE: "the whole of .harnex/ ignores itself under local visibility",
+        CLAUDE_LOCAL: "the one import local visibility ever writes",
+    }
+
+    _plan_local_entry_files(plan, project)
+    _plan_local_config(plan, project, plugin_root, answers, mode)
+    _plan_harness_files(plan, project, answers, desired, why, recorded_paths, record is None)
+    _plan_git_exclude(plan, project)
+    owned = _plan_settings(plan, project, plugin_root, record, target=SETTINGS_LOCAL, owner="local")
+    _plan_local_mcp_notice(plan, plugin_root, answers)
+    _plan_local_store(plan, answers)
+    if mode == "setup":
+        _plan_global_instructions(plan, home, answers)
+    _plan_record(plan, project, desired, owned, {})
+    return plan
 
 
 def _plan_record(
@@ -970,7 +1352,10 @@ def apply_plan(plan: Plan) -> list[str]:
     for step in plan.steps:
         if step.data is None:
             continue
-        write_atomic(plan.project / step.path, step.data)
+        # Every step's path is project-relative, except local visibility's one global
+        # offer (design.md D7), which names an absolute path outside the project.
+        target = Path(step.path) if Path(step.path).is_absolute() else plan.project / step.path
+        write_atomic(target, step.data)
         written.append(step.path)
     return written
 
@@ -1042,11 +1427,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--answers", help="the answers document, or - for stdin")
     parser.add_argument("--project", default=".", help="the project to set up")
     parser.add_argument("--plugin-root", default=None, help="where the harness is installed")
+    parser.add_argument(
+        "--home", default=None, help="the home directory (local visibility's one global offer)"
+    )
     parser.add_argument("--json", action="store_true", help="print the plan as JSON")
     args = parser.parse_args(argv)
 
     project = Path(args.project).resolve()
     plugin_root = Path(args.plugin_root).resolve() if args.plugin_root else default_plugin_root()
+    home = Path(args.home).resolve() if args.home else None
 
     try:
         if args.verb == "choices":
@@ -1056,7 +1445,7 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--answers is required to plan or write")
         text = sys.stdin.read() if args.answers == "-" else Path(args.answers).read_text("utf-8")
         answers = read_answers(text, plugin_root)
-        plan = build_plan(project, plugin_root, answers)
+        plan = build_plan(project, plugin_root, answers, home=home)
         if args.json:
             print(plan_as_json(plan))
         else:

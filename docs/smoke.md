@@ -630,3 +630,75 @@ the project).
   than refusing it as a hand-edit conflict the way step 4 did. `git status --short`
   afterwards still shows `.harnex/rules.md` and `.harnex/manifest.json` modified against
   the step 3 commit — now the second change, both files — and nothing else.
+
+---
+
+## personal-local-setup (C7)
+
+**Delivers:** a `visibility: local` choice in `/harnex:setup` — nothing it writes for a
+project ever reaches that project's own version-control history, on an empty project or
+on one with its own existing, committed `AGENTS.md`.
+
+**Verified against:** Claude Code 2.1.285, Python 3.13 through `uv`, git 2.x.
+
+**Steps**
+
+1. Set up a scratch project that already looks like a team's own repository:
+   ```bash
+   mkdir -p /tmp/harnex-local && cd /tmp/harnex-local && git init -q
+   git config user.email t@t.com && git config user.name t
+   echo "# an existing team brief" > AGENTS.md
+   git add -A && git commit -qm "existing brief"
+   cd ~/Developer/harnex
+   ```
+2. Register a local OpenSpec store for it and build the answers document, `store_id`
+   included:
+   ```bash
+   openspec store setup harnex-local-smoke --path /tmp/harnex-local-store --json
+   cat > /tmp/harnex-local-answers.json <<'JSON'
+   {"project_name": "local-smoke", "profiles": [], "sets": ["git", "sdd"], "features": [],
+    "canary": "", "decision_model": "mock", "check_command": "make check",
+    "approvals": {"pointer_agents": false, "pointer_claude": false, "adopt": []},
+    "visibility": "local", "tools": ["claude"], "store_id": "harnex-local-smoke"}
+   JSON
+   ```
+3. Plan, then write, with a scratch home directory so the one global offer never touches
+   your own `~/.claude/settings.json`:
+   ```bash
+   mkdir -p /tmp/harnex-local-home
+   uv run plugin/scripts/setup.py plan --answers /tmp/harnex-local-answers.json \
+     --project /tmp/harnex-local --home /tmp/harnex-local-home
+   uv run plugin/scripts/setup.py write --answers /tmp/harnex-local-answers.json \
+     --project /tmp/harnex-local --home /tmp/harnex-local-home
+   ```
+4. Look at what changed, from git's own point of view:
+   ```bash
+   git -C /tmp/harnex-local status --porcelain
+   git -C /tmp/harnex-local status --porcelain --ignored
+   cat /tmp/harnex-local/AGENTS.md
+   cat /tmp/harnex-local/CLAUDE.local.md
+   cat /tmp/harnex-local/.git/info/exclude
+   ```
+5. Run setup again, unchanged: nothing is proposed, and the recorded `store_id` would be
+   reused rather than registering a second store:
+   ```bash
+   uv run plugin/scripts/setup.py plan --answers /tmp/harnex-local-answers.json \
+     --project /tmp/harnex-local --home /tmp/harnex-local-home
+   ```
+
+**Expect**
+
+- Step 3's plan lists `AGENTS.md` and `CLAUDE.md` too, each `keep` — the plan reports
+  every surveyed path, whether or not it writes it — but writes only
+  `CLAUDE.local.md`, `.harnex/config.yml`, `.harnex/rules.md`, `.harnex/.gitignore`,
+  `.git/info/exclude` and `.claude/settings.local.json`; `AGENTS.md`/`CLAUDE.md` never
+  get a write action. A notice about the one global settings offer also appears, since
+  `/tmp/harnex-local-home/.claude/settings.json` does not exist yet.
+- Step 4: plain `git status --porcelain` prints nothing at all — the existing `AGENTS.md`
+  commit is the only history this repository has. `--ignored` shows `.harnex/` and the
+  two root-level files as ignored, not merely absent from the listing.
+  `/tmp/harnex-local/AGENTS.md` still reads "# an existing team brief", byte for byte.
+  `CLAUDE.local.md` holds one line, `@.harnex/rules.md`. `.git/info/exclude` lists both
+  `CLAUDE.local.md` and `.claude/settings.local.json`.
+- Step 5: "Nothing to do" — not a second store registration, not a second insertion
+  attempt, not a rewritten `.harnex/config.yml`.
