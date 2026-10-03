@@ -17,7 +17,8 @@ Build a small state document:
 {"phase": "explore", "task": "<the person's own framing of the idea, one paragraph>", "profiles": []}
 ```
 
-`profiles` comes from the project's `.harnex.yml` if it exists (its `profiles` list);
+`profiles` comes from the project's recorded choices — `.harnex/config.yml` if it exists
+(`local` visibility), otherwise `.harnex.yml` — if either exists (its `profiles` list);
 otherwise leave it empty. Then run:
 
 ```

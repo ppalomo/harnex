@@ -17,7 +17,16 @@ print `Decision (advice): propose → <decision> · confidence <confidence>` or 
 (advice): propose → unavailable (<reason>)`. Never ask the person to pick a tool or model
 for it — this phase runs in the main session too.
 
-## 2. Snapshot the working tree before anything is written
+## 2. Local visibility: resolve the change's own store, if there is one
+
+Read the project's recorded choices: `.harnex/config.yml` if it exists (`local`
+visibility), otherwise `.harnex.yml` (`shared`, or no recorded choices yet — skip the
+rest of this step). Under `local` visibility, every `openspec` call below takes
+`--store <store_id>` (the id recorded there), and the change's artifacts live in that
+store's own root, never under this project's `openspec/`. Nothing else in this skill
+changes: it is the one flag, carried on every `openspec` call that follows.
+
+## 3. Snapshot the working tree before anything is written
 
 ```
 git status --porcelain=v1 --untracked-files=all > <a temporary file>
@@ -25,30 +34,33 @@ git status --porcelain=v1 --untracked-files=all > <a temporary file>
 
 Keep that file's path; the scope check at the end needs it. This has to happen before the
 change directory exists, or the change's own new files would already be "before" state.
+This snapshot is always of the project's own tree, whatever visibility applies: under
+`local` visibility the change's artifacts never appear in it at all, which is exactly
+step 6's point.
 
-## 3. Learn what the person wants, and name the change
+## 4. Learn what the person wants, and name the change
 
 If the idea is not already clear from the conversation (including a prior `/harnex:explore`
 run), ask what they want to build. Derive a short kebab-case name from it. Then:
 
 ```
-openspec new change "<name>"
+openspec new change "<name>"  # [--store <id>, local visibility only]
 ```
 
 If a change with that name already exists, tell the person and ask whether to continue it
 or pick a different name — do not silently overwrite or silently rename it.
 
-## 4. Write every required artifact, asking only in plain language
+## 5. Write every required artifact, asking only in plain language
 
 ```
-openspec status --change "<name>" --json
+openspec status --change "<name>" --json  # [--store <id>, local visibility only]
 ```
 
 tells you which artifacts the schema requires and their dependency order. For each one
 that is `ready`:
 
 ```
-openspec instructions <artifact-id> --change "<name>" --json
+openspec instructions <artifact-id> --change "<name>" --json  # [--store <id>, local visibility only]
 ```
 
 gives you its template and rules. Write it to the path it names, reading any completed
@@ -59,31 +71,33 @@ and should not do, how it should work — in their own words; never ask them to 
 one artifact can unblock another. Keep going until every artifact the change's own schema
 requires exists.
 
-## 5. Check the change stayed inside its own directory
+## 6. Check the change stayed inside its own directory
 
 ```
 uv run "${CLAUDE_PLUGIN_ROOT}/feedback/scope_check.py" check --change "<name>" --before <the snapshot file> --project .
 ```
 
-Show the person whatever it reports. If it names a path, say so plainly — it is a report,
-not a failure, and finishing this phase does not depend on it being clean.
+This always checks the project's own tree — never `--store`, whatever visibility
+applies. Show the person whatever it reports. If it names a path, say so plainly — it is
+a report, not a failure, and finishing this phase does not depend on it being clean.
 
-## 6. Start the verifier once, and show its review
+## 7. Start the verifier once, and show its review
 
 Start the `verifier` subagent (the `Agent` tool, `subagent_type: verifier`) with the
 change's directory to review. Present its review exactly as it comes back — do not
 summarise away a finding, and do not revise an artifact on its behalf. Whether to act on
 what it found is the person's call.
 
-## 7. Finish
+## 8. Finish
 
-Tell the person where the artifacts live (`openspec/changes/<name>/`) and that reviewing
-or revising them is the next step. Do not imply a command exists to build them if it does
+Tell the person where the artifacts live — `openspec/changes/<name>/` under `shared`
+visibility, or the resolved store's own root under `local` — and that reviewing or
+revising them is the next step. Do not imply a command exists to build them if it does
 not yet.
 
 ## What this skill never does
 
-- Write anything outside the new change's own directory without reporting it (step 5).
+- Write anything outside the new change's own directory without reporting it (step 6).
 - Ask the person to name an OpenSpec concept instead of describing what they want.
 - Call the verifier more than once per run, or edit an artifact after it has reviewed.
 - Tick anything, since there is no `tasks.md` execution here — that is `apply`'s job.

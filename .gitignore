@@ -6,6 +6,9 @@
 .env.*
 CLAUDE.local.md
 .claude/settings.local.json
+# ...except the harness's own template for local visibility (docs/PLAN.md C7): source,
+# not a personal instance, and must be committed like every other template.
+!/plugin/context/templates/CLAUDE.local.md
 
 # Python
 .venv/

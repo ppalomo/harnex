@@ -87,17 +87,21 @@ def parse_tasks(text: str) -> list[Task]:
     return tasks
 
 
-def tasks_md_path(project: Path, change: str) -> Path:
-    return project / "openspec" / "changes" / change / "tasks.md"
+def tasks_md_path(project: Path, change: str, changes_root: Path | None = None) -> Path:
+    """`changes_root` defaults to `project` (today's behaviour, unchanged); under local
+    visibility (docs/PLAN.md C7) the skill passes the registered OpenSpec store's own
+    root instead, since the change's `openspec/changes/<name>/` lives there, not in the
+    project at all."""
+    return (changes_root or project) / "openspec" / "changes" / change / "tasks.md"
 
 
-def load_tasks(project: Path, change: str) -> list[Task]:
-    return parse_tasks(tasks_md_path(project, change).read_text(encoding="utf-8"))
+def load_tasks(project: Path, change: str, changes_root: Path | None = None) -> list[Task]:
+    return parse_tasks(tasks_md_path(project, change, changes_root).read_text(encoding="utf-8"))
 
 
-def tick_task(project: Path, change: str, task_id: str) -> None:
+def tick_task(project: Path, change: str, task_id: str, changes_root: Path | None = None) -> None:
     """The loop's own act (`apply-command`'s own requirement) — never the builder's."""
-    path = tasks_md_path(project, change)
+    path = tasks_md_path(project, change, changes_root)
     text = path.read_text(encoding="utf-8")
     pattern = re.compile(
         rf"^(?P<indent>\s*)- \[ \] {re.escape(task_id)}(?=\s)", re.MULTILINE
@@ -319,14 +323,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fingerprint-at-check")
     parser.add_argument("--fingerprint-at-acceptance")
     parser.add_argument("--decisions-dir", type=Path, default=None)
+    parser.add_argument(
+        "--changes-root",
+        default=None,
+        help="where openspec/changes/<name>/ lives, if not the project itself "
+        "(local visibility's own registered OpenSpec store)",
+    )
     args = parser.parse_args(argv)
 
     project = Path(args.project).resolve()
     decisions_dir = args.decisions_dir or decide.default_decisions_dir()
+    changes_root = Path(args.changes_root).resolve() if args.changes_root else None
 
     try:
         if args.verb == "route":
-            tasks = [task for task in load_tasks(project, args.change) if not task.done]
+            tasks = [task for task in load_tasks(project, args.change, changes_root) if not task.done]
             backend = decide._project_backend(project)  # noqa: SLF001 (sibling module)
             api_key = os.environ.get("OPENROUTER_API_KEY")
             results = route_all(project, decisions_dir, tasks, backend, api_key)
@@ -334,7 +345,7 @@ def main(argv: list[str] | None = None) -> int:
                 print(result["line"])
             print(json.dumps(results))
         elif args.verb == "scope":
-            tasks = {task.id: task for task in load_tasks(project, args.change)}
+            tasks = {task.id: task for task in load_tasks(project, args.change, changes_root)}
             task = tasks.get(args.task_id) or Task(args.task_id, args.task_text or "", False, ())
             backend = decide._project_backend(project)  # noqa: SLF001
             api_key = os.environ.get("OPENROUTER_API_KEY")
@@ -369,7 +380,7 @@ def main(argv: list[str] | None = None) -> int:
             )
             print(json.dumps({"accepted": result.accepted, "reasons": list(result.reasons)}))
         elif args.verb == "tick":
-            tick_task(project, args.change, args.task_id)
+            tick_task(project, args.change, args.task_id, changes_root)
             print(f"ticked {args.task_id}")
         elif args.verb == "state-show":
             print(json.dumps(load_run_state(project, args.change)))

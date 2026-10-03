@@ -1,0 +1,11 @@
+# The project's answers to the harness's questions, under local visibility (docs/PLAN.md
+# C7) — a new file, not a rename of `.harnex.yml`; `shared` visibility still uses that one,
+# unchanged.
+#
+# This file belongs to you alone: the harness reads it and never rewrites it, and it is
+# excluded from version control from the moment it is written (the directory it lives in
+# ignores itself). Change a value here and run setup again to re-render what the harness
+# owns. The shape is flat, the same as `.harnex.yml`'s, with three answers of its own:
+# `visibility`, `tools` (the builder bindings you want active) and `store_id` (the local
+# OpenSpec store this project's own propose/apply/verify/ship work lives in).
+{{keys}}

@@ -63,10 +63,18 @@ def write_facts(project: Path, facts: dict[str, object]) -> Path:
 
 def run_check(project: Path, base_ref: str, plugin_root: Path) -> tuple[Path, dict[str, object]]:
     """Run the recorded command and save its result against the tree it leaves behind."""
-    choices_path = project / setup_script.CHOICES
+    # Whichever is there (docs/PLAN.md C7): `.harnex/config.yml` under local visibility,
+    # `.harnex.yml` under shared — the same resolution `update.py`'s own
+    # `read_recorded_choices` uses, just stopping short of building a full `Answers`
+    # since this script only ever needs `check_command` and `profiles`.
+    local_path = project / setup_script.LOCAL_CHOICES
+    if local_path.is_file():
+        choices_path, keys, list_keys = local_path, setup_script.LOCAL_ANSWER_KEYS, setup_script.LOCAL_LIST_KEYS
+    else:
+        choices_path, keys, list_keys = project / setup_script.CHOICES, setup_script.ANSWER_KEYS, setup_script.LIST_KEYS
     try:
         choices = setup_script.parse_choices(
-            choices_path.read_text(encoding="utf-8"), str(choices_path)
+            choices_path.read_text(encoding="utf-8"), str(choices_path), keys, list_keys
         )
     except (OSError, setup_script.SetupError) as error:
         raise VerifyChecksError(f"could not read {choices_path}: {error}") from error

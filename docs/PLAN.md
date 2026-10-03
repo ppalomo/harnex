@@ -232,6 +232,24 @@ state:
 | `openspec/config.yaml` | **project** | yes | created only if missing, with the harness's artifact rules; afterwards only you change it |
 | `.harnex/state/` | runtime | no | decision journal and apply run state; ignored by a `.gitignore` inside the directory itself, so the project's own `.gitignore` is never touched |
 
+**Local visibility (`C7`) replaces the table above entirely, never extends it.** Setup
+also asks a `visibility` choice, `shared` (the table above, the default) or `local` — the
+project is not being adopted by a team, only used by the person running it. Under
+`local`, nothing is committed, and nothing above is created or modified, existing or not:
+
+| Path | Owner | Committed | Notes |
+|---|---|---|---|
+| `AGENTS.md`, `CLAUDE.md`, `openspec/config.yaml`, `.claude/settings.json`, `.mcp.json` | **project** | — | never read for insertion, never written; exactly as they were before setup ran |
+| `CLAUDE.local.md` | harness | no | one `@.harnex/rules.md` import; excluded via `.git/info/exclude`, never the project's own `.gitignore` |
+| `.harnex/config.yml` | **project** | no | your answers, `.harnex.yml`'s own ten-key local cousin — a new path, not a rename; `.harnex.yml` itself is untouched |
+| `.harnex/rules.md`, `.harnex/manifest.json`, `.harnex/state/` | harness / runtime | no | the whole of `.harnex/` ignores itself, not only `state/` |
+| `.claude/settings.local.json` | **local, by entry** | no | the permission floor's entries, Claude Code's own personal/gitignored settings layer |
+| an OpenSpec store | — | no | registered on the machine (`openspec store setup`), not a directory inside the project at all; `propose`/`apply`/`verify`/`ship` resolve `--store` from `.harnex/config.yml`'s `store_id` (`explore`/`review` never touch `openspec` at all) |
+| `~/.claude/settings.json` | **you** | — | one global, one-time, explicit-yes offer so `CLAUDE.local.md` never silently stops `AGENTS.md` from loading; not a project path at all |
+
+`git status` is clean immediately after setup and stays clean through every later harness
+operation on that project. No promotion path from `local` to `shared` exists yet.
+
 **Entry files belong to the project.** `AGENTS.md` and `CLAUDE.md` are the files each
 tool opens first, and projects already have them. The harness needs exactly one thing
 from each: a **pointer line** — in `AGENTS.md` a sentence telling Codex to read
@@ -622,8 +640,110 @@ enforces itself. Each is its own OpenSpec change, in this order.
   - **An apply-time verify step must never be briefed to run a harness-refreshing script against the apply session's own working repository.** Task 4.1's own verify text asked for "a fixture run against this repository's own `.harnex.yml`" producing "nothing to do." Taken literally — `update.py --project .` against this actual checkout — it was not a no-op: this repository's own `.harnex/rules.md` and `.harnex/manifest.json` had drifted out of date against `.harnex.yml`'s current `sets` (the `safety` set is commented out there but was still rendered in), so the run rewrote both. `.harnex/` is a protected path no task's scope can widen into, so that write was reverted and task 4.1 accepted on its own diff alone, the drift left as found. The lesson for any future verify step that would exercise `update.py` for real: point it at a fixture or a copy, never at the real `.harnex/` of the repository the session is running in. (Separately, this repository's own `.harnex/rules.md`/`manifest.json` staleness against `.harnex.yml` is real, pre-existing, and still unfixed — worth the owner running `/harnex:update` for real, outside any change's own scope.)
   - **A task's own "add a test" can already be satisfied by prior work.** Task 5.1 asked for a new test asserting the two manifests' `version` fields agree; `tests/test_manifests.py` has asserted exactly that (`entry["version"] == plugin["version"]`) since `C1a`. No new test was needed — the task's verify criterion was already met, and nothing in the diff for 5.1 changes that file.
 
+### C7 · a personal, local-only setup — **delivered**, change `personal-local-setup`
+
+- **Delivers:** a `visibility` choice (`shared`/`local`, default `shared`) in
+  `/harnex:setup`'s questions; under `local`, `AGENTS.md` and `CLAUDE.md` are never
+  created or modified, existing or not — `CLAUDE.local.md` is written instead (one
+  `@.harnex/rules.md` import), excluded through `.git/info/exclude` rather than the
+  project's own ignore file; `.harnex/`'s self-ignoring `.gitignore` widens from
+  `state/` to the whole directory, which now also holds `.harnex/config.yml` (a new
+  path, `.harnex.yml`'s own ten-key local cousin — decision 11 is not reopened, that
+  file keeps its shape); the permission floor goes to `.claude/settings.local.json`
+  instead of `.claude/settings.json`; an MCP entry is recommended via
+  `claude mcp add --scope local` rather than written into `.mcp.json`; a local OpenSpec
+  store is registered (`openspec store setup`, keyed like Claude Code's own auto-memory)
+  instead of creating `openspec/` in the project, and `propose`/`apply`/`verify`/`ship`
+  resolve `--store`/`--changes-root` from it (`explore` and `review` never do — neither
+  touches `openspec` at all, under either visibility); a guided question list including
+  which
+  builder tools are active, stating plainly that Codex cannot read this project's rules
+  under `local` visibility; and a one-time, explicit-yes `~/.claude/settings.json` offer
+  (`instructionFiles: claude-md-and-agents-md`) so a project's own `CLAUDE.local.md`
+  never silently stops its `AGENTS.md` from loading. `shared` visibility — everything
+  C1c through C6 built — is untouched.
+- **You try it:** `/harnex:setup`, choose `local`, on an empty scratch project and on one
+  with its own committed `AGENTS.md`: `git status` is clean immediately after and after
+  every later command. Run setup again: nothing changes, the recorded `store_id` is
+  reused. Decline the global settings offer: the notice returns on the next run. Full
+  steps in `docs/smoke.md`'s own section for this change.
+- **Tests:** every new path's survey/plan/write classes, mirroring `test_setup_survey.py`
+  and `test_setup_write.py`'s own style; `git status --porcelain` asserted empty with a
+  real git repository, both fresh and over an existing team repo; the global offer's four
+  outcomes (missing, already correct, shown-not-written, written-after-yes); the guided
+  question list and the Codex disclosure, asserted as skill content the same way the
+  reviewer's fixed `opus` model already is; `apply_loop.py`'s `--changes-root`,
+  `update.py`'s and `verify_checks.py`'s now-dual-path config reading.
+- **Exit:** met for the hand-run walkthrough in `docs/smoke.md` and for everything
+  `uv run --with pytest pytest`, both `claude plugin validate --strict` calls and
+  `openspec validate --all` check (task 9.1); every one of the change's 17 tasks is
+  checked. **Not yet confirmed live**, the same kind of gap C5 and C6 each named for
+  their own open items: exactly which file `claude mcp add --scope local` writes its
+  entry to (the smoke walkthrough uses no UI profile, so the command never runs there),
+  and whether `instructionFiles: claude-md-and-agents-md` keeps a real Claude Code
+  session reading `AGENTS.md` alongside `CLAUDE.local.md` end to end, rather than only
+  by the file comparison the walkthrough and the tests both rely on.
+- **What it taught us**, from this change's own `apply` run:
+  - **A task list's own file list can be wrong, and only implementation catches it.**
+    Task 5.2, as written, named `plugin/skills/explore/` and `plugin/skills/review/`
+    among the skills needing store resolution; neither ever calls `openspec` at all —
+    there was nothing to resolve. The task also missed that `apply_loop.py`,
+    `scope_check.py` and `verify_checks.py` read or write `openspec/changes/<name>/`
+    paths directly, never through the `openspec` CLI, so a `--store` flag could not have
+    reached them regardless — they needed their own `--changes-root` parameter (or, for
+    `verify_checks.py`, a `.harnex/config.yml`-first read, the same gap `update.py` had).
+    Surfaced to the owner mid-run rather than absorbed silently, since it changed the
+    task's own scope (`design.md`'s own discipline, §4's "surface the added scope and
+    ask").
+  - **`scope_check.py` needed no change, for a reason worth recording.** It looked, at
+    first, like a fourth script needing store-awareness. It does not: under `local`
+    visibility a change's artifacts never appear in the *project's* own `git status` at
+    all, so everything `scope_check.py` already treats as "outside the change" is
+    correctly outside it — the check's existing logic was already right for a case it
+    was never written with in mind.
+  - **A machine's own global git configuration can make a test pass for the wrong
+    reason.** The first version of the "`git status` is clean" test used
+    `--ignored` and asserted the output was empty; it passed, but only because this
+    owner's own `~/.config/git/ignore` already excluded `.claude/settings.local.json` —
+    a convention this change was supposed to establish, not assume. Caught by checking
+    *why* a `.claude/` line was being reported as ignored rather than trusting the green
+    test; fixed by adding `.claude/settings.local.json` to `.git/info/exclude` itself,
+    not relying on anything outside the project, and re-verified with
+    `GIT_CONFIG_GLOBAL=/dev/null`.
+  - **A registered OpenSpec store already contains its own ordinary `openspec/`
+    subdirectory.** `openspec store setup <id> --path <root>` creates `<root>/openspec/
+    changes/`, `<root>/openspec/specs/` and `<root>/openspec/config.yaml` — the same
+    shape a project's own `openspec/` already has. `apply_loop.py`'s existing
+    `tasks_md_path` needed only a second root to resolve against, not a new path scheme.
+  - **Correcting a mid-run discovery in the code and the tests is not the same as
+    correcting it everywhere a planning artifact restates it.** The `explore`/`review`
+    correction above landed cleanly in `design.md`, the `local-visibility` delta spec,
+    and this change's own `tasks.md` — but the first `/harnex:verify` pass still found
+    the earlier, broader claim ("every one of the five commands resolves `--store`")
+    standing in `proposal.md`'s own Impact section, and a *second* `/harnex:verify` pass,
+    on the tree the first pass's fixes produced, found the same claim still standing in
+    `proposal.md`'s "What Changes" section and in this very table's own OpenSpec-store
+    row. Two independent, fresh-context passes were needed to clear every copy — one
+    phrase, repeated across five documents by hand, drifted out of sync with itself
+    twice before it was found everywhere. A single search across every artifact for the
+    exact phrase being corrected, the moment it is first corrected anywhere, would have
+    caught both in one pass. It would have caught a third occurrence too: a *third*
+    fresh `/harnex:verify` pass, briefed not to trust either earlier fix, found the same
+    self-contradiction standing a third time — in this very "Delivers" bullet above (not
+    only in `proposal.md`), and, worse, shipped past planning prose entirely into
+    `setup.py`'s own `_plan_local_store` notice (the string actually shown to a person
+    running `/harnex:setup`) and into `plugin/context/templates/local-config.yml`'s own
+    header comment, the one template that renders into every `local`-visibility
+    project's own `.harnex/config.yml`, forever. Neither of those two was planning prose
+    reviewed as such — they were source and a shipped template, found only because the
+    third pass was told to re-derive everything from the diff rather than lean on what
+    the first two passes said they had already fixed. The fix this time was the
+    exhaustive one the note above already named: one `grep` for the exact phrase across
+    every touched file, not another targeted read.
+
 Later, not scheduled: tuning thresholds from the journal's resolutions; a Codex-side guard
-hook; a `security-reviewer` for projects with an attack surface. Never: an unattended mode.
+hook; a `security-reviewer` for projects with an attack surface; promoting a `local` setup
+to `shared`. Never: an unattended mode.
 
 ## 12. Decisions taken
 

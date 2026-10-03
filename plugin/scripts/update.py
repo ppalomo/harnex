@@ -50,15 +50,55 @@ def read_choices(text: str, plugin_root: Path, path: str = setup.CHOICES) -> "se
     return answers
 
 
+def read_local_choices(text: str, plugin_root: Path, path: str = setup.LOCAL_CHOICES) -> "setup.Answers":
+    """`read_choices`'s own local-visibility twin (docs/PLAN.md C7): `.harnex/config.yml`'s
+    ten-key shape, same no-approvals reasoning, same `setup.parse_choices` reader — just
+    the other key/list-key set."""
+    values = setup.parse_choices(text, path, setup.LOCAL_ANSWER_KEYS, setup.LOCAL_LIST_KEYS)
+    answers = setup.Answers(
+        project_name=str(values["project_name"]),
+        profiles=tuple(values["profiles"]),  # type: ignore[arg-type]
+        sets=tuple(values["sets"]),  # type: ignore[arg-type]
+        features=tuple(values["features"]),  # type: ignore[arg-type]
+        canary=str(values["canary"]),
+        decision_model=str(values["decision_model"]),
+        check_command=str(values["check_command"]),
+        visibility=str(values["visibility"]),
+        tools=tuple(values["tools"]),  # type: ignore[arg-type]
+        store_id=str(values["store_id"]),
+    )
+    setup.validate_answers(answers, plugin_root)
+    return answers
+
+
+def read_recorded_choices(project: Path, plugin_root: Path) -> "setup.Answers":
+    """Whichever file is there — `.harnex/config.yml` (local) or `.harnex.yml` (shared) —
+    read into the same `Answers` shape (local-visibility spec's own "every harness
+    operation reads this value... rather than infer it", satisfied by which file exists,
+    design.md D2). Raises the same refusal `run_update` already raised for a missing
+    `.harnex.yml`, now naming whichever path is actually missing."""
+    local_path = project / setup.LOCAL_CHOICES
+    if local_path.is_file():
+        return read_local_choices(local_path.read_text(encoding="utf-8"), plugin_root)
+    shared_path = project / setup.CHOICES
+    if shared_path.is_file():
+        return read_choices(shared_path.read_text(encoding="utf-8"), plugin_root)
+    raise setup.SetupError(
+        f"neither {setup.LOCAL_CHOICES} nor {setup.CHOICES} is here, so this project has "
+        "not been set up. Run `/harnex:setup` instead."
+    )
+
+
 # --- update's own run: plan and write in one pass, no approval gate (design.md D3) --
 
 
-def run_update(project: Path, plugin_root: Path) -> tuple[str, bool]:
+def run_update(project: Path, plugin_root: Path, home: Path | None = None) -> tuple[str, bool]:
     """Refresh a project's harness-owned content from its own recorded choices.
 
-    Raises `setup.SetupError`, writing nothing, for either refusal: `.harnex.yml`
-    absent (the project was never set up), or present with no manifest (there is no
-    record of what the harness owns, so update will not guess — setup can adopt it).
+    Raises `setup.SetupError`, writing nothing, for either refusal: neither recorded
+    answers file present (the project was never set up), or present with no manifest
+    (there is no record of what the harness owns, so update will not guess — setup can
+    adopt it).
 
     Otherwise builds the plan through `setup.build_plan(..., mode="update")` and, since
     an update plan holds nothing beyond what setup's own yes already approved (design.md
@@ -66,13 +106,7 @@ def run_update(project: Path, plugin_root: Path) -> tuple[str, bool]:
     or applies it in the same pass. Returns the report `setup.render_plan` already knows
     how to produce, and whether the run succeeded (`False` for a conflict).
     """
-    choices_path = project / setup.CHOICES
-    if not choices_path.is_file():
-        raise setup.SetupError(
-            f"{setup.CHOICES} is not here, so this project has not been set up. "
-            "Run `/harnex:setup` instead."
-        )
-    answers = read_choices(choices_path.read_text(encoding="utf-8"), plugin_root)
+    answers = read_recorded_choices(project, plugin_root)
 
     if setup.read_manifest(project) is None:
         raise setup.SetupError(
@@ -81,7 +115,7 @@ def run_update(project: Path, plugin_root: Path) -> tuple[str, bool]:
             "which can adopt the project, instead."
         )
 
-    plan = setup.build_plan(project, plugin_root, answers, mode="update")
+    plan = setup.build_plan(project, plugin_root, answers, mode="update", home=home)
     if plan.conflicts:
         return setup.render_plan(plan, verb="plan"), False
 
@@ -104,15 +138,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--project", default=".", help="the project to update")
     parser.add_argument("--plugin-root", default=None, help="where the harness is installed")
+    parser.add_argument(
+        "--home", default=None, help="the home directory (local visibility's one global offer)"
+    )
     args = parser.parse_args(argv)
 
     project = Path(args.project).resolve()
     plugin_root = (
         Path(args.plugin_root).resolve() if args.plugin_root else setup.default_plugin_root()
     )
+    home = Path(args.home).resolve() if args.home else None
 
     try:
-        report, ok = run_update(project, plugin_root)
+        report, ok = run_update(project, plugin_root, home)
     except setup.SetupError as error:
         print(f"update: {error}", file=sys.stderr)
         return 1
