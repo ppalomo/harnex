@@ -29,6 +29,14 @@ rewrites either file.
 
 ## 2. Ask, in this order, only what you cannot derive
 
+The questions below are more than a question tool takes in one call: `AskUserQuestion`
+accepts at most 4 questions per call, each with 2 to 4 options, and a call that exceeds
+either limit fails with "Invalid tool parameters". Ask in batches of at most 4, keeping
+the order, and fold a question into its neighbour only when the answers are independent
+(the name and the visibility, for instance). A list longer than 4 — the rule sets — is a
+multi-select question that proposes the whole list in its description, or a plain
+question in the conversation, never more than 4 options.
+
 1. **Project name** — propose the directory's name.
 2. **Visibility** — `shared` (the default: the project's team, via source control) or
    `local` (the person running it alone — nothing setup writes ever reaches this
