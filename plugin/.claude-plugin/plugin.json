@@ -1,6 +1,6 @@
 {
   "name": "harnex",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A reusable harness for AI coding agents, organised by the five pillars of a harness.",
   "author": {
     "name": "Pablo Palomo",
