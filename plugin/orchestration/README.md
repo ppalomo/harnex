@@ -36,6 +36,9 @@ The nervous system: who does what, in which order, and who decides.
 - `../scripts/ship_gate.py` — records verifier findings and decides whether a fresh,
   non-blocking verification may proceed to `ship` (`C5`), kept in `scripts/` for the same
   reason.
+- `../scripts/version_bump.py` — detects a project's plugin manifest and marketplace
+  entry and computes or writes the candidate patch/minor/major version (`C8`), kept in
+  `scripts/` for the same reason.
 - `../agents/verifier.md` — the verifier's Claude Code adapter, binding the role prompt
   under `roles/verifier.md`.
 - `../agents/builder.md` — the builder's Claude Code adapter (`C3`), binding
@@ -58,3 +61,6 @@ pillar 4, not here.
 verifier's `/harnex:verify` extension for the diff, facts file, and severity-carrying
 findings; `verify_checks.py` and `ship_gate.py`; and the workflow's `verify` and `ship`
 entries. Next: `C6` adds the update command in pillar 2, not here.
+
+`C8` — **delivered**: `version_bump.py` and the `/harnex:ship` extension that calls it
+to ask the version bump before shipping.

@@ -633,7 +633,7 @@ enforces itself. Each is its own OpenSpec change, in this order.
 - **Delivers:** `/harnex:update` (`plugin/skills/update/`, `plugin/scripts/update.py`) implementing the contract C1c fixed — `build_plan` gains a `mode: Literal["setup", "update"]` parameter so update never creates or inserts into a project-owned file, a standard-library-only reader for `.harnex.yml`'s own flat shape, and the two refusal cases (no `.harnex.yml`, or one with no manifest) checked before any plan is built; a `pytest` check that the two plugin manifests' `version` fields agree; two CI workflows, `.github/workflows/check.yml` (every push and pull request, mirroring `AGENTS.md`'s own "Before committing" list) and `.github/workflows/release.yml` (a pushed `vX.Y.Z` tag, re-running the same checks, then asserting the tag matches both manifests before publishing a GitHub release); `docs/releasing.md`, the manual steps a person runs to cut a release, linked from `AGENTS.md`; the README rewritten for a stranger, with a "verified against" table (Claude Code `2.1.285`, the Codex plugin and `codex-cli`, OpenSpec) and `setup`/`update` documented alongside the five commands — later extended, in `readme-dev-workflow`, with a "🛠 Developing harnex" section covering setup *of this repository itself* and the phases a change moves through while developing harnex, each with its own inline Mermaid diagram.
 - **You try it:** change a rule in your harnex checkout, bump the version, `claude plugin update harnex`, `/harnex:update` in the project: only `.harnex/rules.md` and the manifest change. Edit `.harnex/rules.md` by hand and update again: it stops and tells you. Kill it halfway and run it again: it completes. Full steps, against a scratch project, in `docs/smoke.md`'s own "update-and-release (C6)" section.
 - **Tests:** the reader against this repository's own `.harnex.yml`, a malformed fixture, and a render→read round trip against `setup.py`'s own template; `build_plan`'s update-mode branch, asserted both by fixture and by the general guarantee ("no `Step` with `owner == "project"` ever carries `data is not None`" across a matrix of survey states); both refusal cases; a clean run that rewrites only what a changed rule touches; an interrupted run resumed to completion; a simulated fresh clone restoring only `.harnex/state/.gitignore`; the manifest-version-agreement check.
-- **Exit:** met for everything this change's own session could finish. `uv run --with pytest pytest`, both `claude plugin validate --strict` calls and `openspec validate --all` all pass (task 9.1). Two steps in `tasks.md` are deliberately unchecked, left for the owner to do by hand, not part of this change's own session: migrating one real project off the old private marketplace and deregistering it there (8.1/8.2 — `design.md`'s D6 names this as the change's own exit proof, still owed); and tagging `v0.1.0` and confirming the release workflow against the pushed tag (9.2) — nothing on this branch is committed yet, `apply` never commits, and cutting the tag is the owner's own call in `ship`, not `apply`'s. The README and CI exist and validate; "a stranger can install it from the README" holds for the install and setup/update steps, not yet for a tagged release to point at.
+- **Exit:** met for everything this change's own session could finish. `uv run --with pytest pytest`, both `claude plugin validate --strict` calls and `openspec validate --all` all pass (task 9.1). Two steps in `tasks.md` are deliberately unchecked, left for the owner to do by hand, not part of this change's own session: migrating one real project off the old private marketplace and deregistering it there (8.1/8.2 — `design.md`'s D6 names this as the change's own exit proof, still owed); and tagging `v0.1.0` and confirming the release workflow against the pushed tag (9.2) — nothing on this branch is committed yet, `apply` never commits, and cutting the tag is the owner's own call in `ship`, not `apply`'s — `C8` is the change that gave `ship` that call. The README and CI exist and validate; "a stranger can install it from the README" holds for the install and setup/update steps, not yet for a tagged release to point at.
 - **What it taught us**, from this change's own `apply` run and from re-reading the diff for this plan sync (8.1's migration itself did not run in this session — see Exit):
   - **`apply_loop.py`'s own `route` and `scope` verbs never picked up the `.env` fallback C2 just gave `decide.py`.** `resolve_api_key(project)` (added in "jev falls back to a project-local `.env` for its key", landing just before this change) checks the environment first and a project-root `.env` second; `apply_loop.py`'s `main()` still calls `os.environ.get("OPENROUTER_API_KEY")` directly at both of its call sites (`route`, `scope`), so a project whose key lives only in `.env` — this repository's own, during this change's `apply` run — gets every task's routing decision degraded to "ask" even with a valid key on disk. Real, observed, and out of scope here (it is `apply`'s own mechanics, not `update`/`release`); worth a task of its own, the same way C5 named the router's declared-paths gap without fixing it.
   - **The declared-paths gap C5 already named recurred.** `extract_declared_paths` still reads only a task's first line (`TASK_LINE` matches one line at a time), so a task whose own prose names its test file on a continuation line, or only in its "Verify:" sentence, still declares less than it writes. Several tasks in this change's own `tasks.md` did exactly that — the `.harnex.yml` reader and `update.py` tasks (2.1, 3.1) each declared only the script they added, with `tests/test_update_reader.py` and `tests/test_update_run.py` arriving undeclared; the CI task (6.1) declared only `check.yml` and not the workflow's own best-effort validation steps. Each was recognised as in-scope by judgement, same as C5, not by widening the router — still out of scope for this change.
@@ -740,6 +740,55 @@ enforces itself. Each is its own OpenSpec change, in this order.
     the first two passes said they had already fixed. The fix this time was the
     exhaustive one the note above already named: one `grep` for the exact phrase across
     every touched file, not another targeted read.
+
+### C8 · ship asks the version bump — **delivered**, change `ship-asks-version-bump`
+
+- **Delivers:** `plugin/scripts/version_bump.py` (`detect`/`bump` verbs, PEP 723, no
+  dependencies, mirroring `ship_gate.py`'s own shape) — `detect` finds a project's single
+  releasable plugin manifest (a `.claude-plugin/plugin.json` whose `name`/`version` agree
+  with its `.claude-plugin/marketplace.json` entry) and returns its three candidate
+  `X.Y.Z` versions for patch/minor/major, or reports "no releasable manifest" for every
+  other shape (no marketplace file, zero or multiple entries, an unresolved `source`, a
+  disagreement), never guessing; `bump` re-validates the same shape before writing a
+  chosen candidate into both files, through a parsed-JSON round trip that preserves each
+  file's key order and leaves `marketplace.json`'s own `metadata.version` untouched,
+  written atomically the same way `ship_gate.record` already does. `/harnex:ship`'s
+  existing commit-confirmation ask now also runs `detect` first: when a releasable
+  manifest is found, the same turn that asks the person's yes/no also asks the
+  version-bump question — one short explanation of `X.Y.Z` and four choices (no bump,
+  patch, minor, major), each showing the concrete resulting version — folded into one
+  ask, not two; when none is found, the ask is exactly what it always was. A chosen bump
+  is written by `bump` and lands in the same commit `ship` was already making, before the
+  push and the pull request. `ship` never runs `git tag`, never pushes one, and never
+  opens a GitHub release itself — it cannot, since it opens a pull request and never
+  merges it — but when a bump happened, its final report states the exact `git tag
+  vX.Y.Z` / `git push origin vX.Y.Z` commands for the person to run once the pull request
+  merges. `docs/releasing.md`'s steps 1–3 (bump both manifests, run the check command,
+  commit the bump) are reframed as normally already done by `ship`'s own prompt and
+  commit, manual only for a release cut outside `ship`.
+- **You try it:** run `/harnex:ship` on a project carrying an agreeing `plugin.json`/
+  `marketplace.json` pair — this repository included: the existing confirmation ask now
+  also offers no bump/patch/minor/major, each showing the version it would produce;
+  choose one, and the manifests' `version` fields land in the same commit `ship` makes,
+  before it pushes and opens the pull request; the final report names the `git tag`/
+  `git push` commands for after the merge. Run `/harnex:ship` on a project with no
+  releasable manifest: nothing about version appears, the ask is unchanged. Full steps in
+  `docs/smoke.md`'s own section for this change.
+- **Tests:** `detect` against every shape — an agreeing single entry, no marketplace
+  file, zero or multiple entries, an unresolved `source`, a disagreement — asserting the
+  right `found` value and, when true, the right `current_version` and three candidates;
+  `bump`'s re-detection refusal and its atomic, key-order-preserving write, asserted by a
+  line-level diff to touch only the `version` field in each file, for each of
+  patch/minor/major, and to leave `metadata.version` untouched; both CLI subcommands run
+  as real `subprocess` calls against a fixture project, asserting stdout parses as the
+  expected JSON and the exit code matches, `detect` always 0 and `bump` 1 on a failed
+  re-detection.
+- **Exit:** met — the change's own close-out task ran `uv run --with pytest pytest`,
+  both `claude plugin validate --strict` calls, and `openspec validate --all`, all
+  passing, and every task in its `tasks.md` is checked. This closes the item `C6`'s own
+  exit notes left open: cutting the tag is the owner's own call in `ship`, not `apply`'s
+  — this change is what makes `ship` actually ask about it. The real `git tag`/push step
+  itself remains the owner's own manual action after a pull request merges, unchanged.
 
 Later, not scheduled: tuning thresholds from the journal's resolutions; a Codex-side guard
 hook; a `security-reviewer` for projects with an attack surface; promoting a `local` setup

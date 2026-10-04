@@ -702,3 +702,119 @@ on one with its own existing, committed `AGENTS.md`.
   `CLAUDE.local.md` and `.claude/settings.local.json`.
 - Step 5: "Nothing to do" — not a second store registration, not a second insertion
   attempt, not a rewritten `.harnex/config.yml`.
+
+---
+
+## ship-asks-version-bump (C8)
+
+**Delivers:** a version-bump question folded into `/harnex:ship`'s existing
+commit-confirmation ask, offered only when the project being shipped carries a
+releasable plugin manifest (`version_bump.py detect`'s own test); a chosen bump lands in
+the same commit `ship` makes, and `ship`'s final report then states the exact
+`git tag`/`git push` commands for the person to run once the pull request merges, without
+`ship` ever cutting or pushing the tag itself. A project with no such manifest sees the
+single yes/no ask `ship` always asked, unchanged.
+
+**Verified against:** Claude Code 2.1.285, OpenSpec 1.11.0, Python 3.13 through `uv`.
+
+**Steps**
+
+1. Make a scratch project that mirrors this repository's own plugin-manifest shape — a
+   root `.claude-plugin/marketplace.json` with one `plugins[]` entry and a matching
+   `plugin/.claude-plugin/plugin.json` — set it up with the `git` and `sdd` sets, commit
+   it, and push it to a throwaway GitHub repository (`gh repo create` with a scratch name,
+   `--private` is fine) so `ship`'s own `gh pr create` step has somewhere to land:
+   ```bash
+   mkdir -p /tmp/harnex-shipbump && cd /tmp/harnex-shipbump && git init -q -b main
+   git config user.email t@t.com && git config user.name t
+   cd ~/Developer/harnex
+   cat > /tmp/harnex-shipbump-answers.json <<'JSON'
+   {"project_name": "shipbump-smoke", "profiles": [], "sets": ["git", "sdd"], "features": [],
+    "canary": "", "decision_model": "mock", "check_command": "make check",
+    "approvals": {"pointer_agents": true, "pointer_claude": true, "adopt": []}}
+   JSON
+   uv run plugin/scripts/setup.py write --answers /tmp/harnex-shipbump-answers.json \
+     --project /tmp/harnex-shipbump
+   mkdir -p /tmp/harnex-shipbump/plugin/.claude-plugin /tmp/harnex-shipbump/.claude-plugin
+   cat > /tmp/harnex-shipbump/plugin/.claude-plugin/plugin.json <<'JSON'
+   {"name": "shipbump-smoke", "version": "0.1.0", "author": "t"}
+   JSON
+   cat > /tmp/harnex-shipbump/.claude-plugin/marketplace.json <<'JSON'
+   {"name": "shipbump-smoke", "owner": {"name": "t"}, "plugins": [
+     {"name": "shipbump-smoke", "version": "0.1.0", "source": "./plugin",
+      "description": "d", "metadata": {"description": "d"}}
+   ]}
+   JSON
+   cd /tmp/harnex-shipbump && openspec init -q 2>/dev/null || true
+   git add -A && git commit -qm "scratch project with a plugin manifest"
+   gh repo create harnex-shipbump-scratch --private --source=. --remote=origin --push
+   ```
+2. Confirm the detector sees it exactly as `ship` would, before touching a session:
+   ```bash
+   cd ~/Developer/harnex
+   uv run plugin/scripts/version_bump.py detect --project /tmp/harnex-shipbump
+   ```
+3. Make a branch and a small, ordinary edit — enough for `ship`'s direct path (no
+   `openspec/changes/` directory exists for this branch, so `ship` never reaches the
+   gated path in this scratch project):
+   ```bash
+   cd /tmp/harnex-shipbump && git checkout -qb a-change
+   printf 'a line worth shipping\n' > NOTE.txt
+   claude
+   ```
+   Run `/harnex:ship`. Read the single confirmation ask it shows.
+4. Choose **patch** at the version question, then say yes.
+5. Read what the session did, from outside it:
+   ```bash
+   git -C /tmp/harnex-shipbump log -1 --stat
+   cat /tmp/harnex-shipbump/plugin/.claude-plugin/plugin.json
+   cat /tmp/harnex-shipbump/.claude-plugin/marketplace.json
+   ```
+6. Read the session's final report.
+7. In a fresh session on a second branch with another small edit, run `/harnex:ship`
+   again, this time choosing **no bump** at the version question, to confirm the plain
+   path still works:
+   ```bash
+   cd /tmp/harnex-shipbump && git checkout -qb a-second-change
+   printf 'another line\n' >> NOTE.txt
+   claude
+   ```
+8. A scratch project with no plugin manifest at all:
+   ```bash
+   mkdir -p /tmp/harnex-shipbump-none && cd /tmp/harnex-shipbump-none && git init -q -b main
+   git config user.email t@t.com && git config user.name t
+   printf 'hello\n' > file.txt && git add -A && git commit -qm "first commit"
+   gh repo create harnex-shipbump-none-scratch --private --source=. --remote=origin --push
+   git checkout -qb a-change
+   printf 'world\n' >> file.txt
+   claude
+   ```
+   Run `/harnex:ship`.
+9. Tidy up:
+   ```bash
+   gh repo delete harnex-shipbump-scratch --yes
+   gh repo delete harnex-shipbump-none-scratch --yes
+   rm -rf /tmp/harnex-shipbump /tmp/harnex-shipbump-none /tmp/harnex-shipbump-answers.json
+   ```
+
+**Expect**
+
+- Step 2: `{"found": true, ..., "current_version": "0.1.0", "candidates": {"patch":
+  "0.1.1", "minor": "0.2.0", "major": "1.0.0"}}`.
+- Step 3: one ask, not two — the version-bump question is folded into the same
+  confirmation `ship` always asked, offering **no bump**, **patch** (`0.1.0 -> 0.1.1`),
+  **minor** (`0.1.0 -> 0.2.0`) and **major** (`0.1.0 -> 1.0.0`), each stated with its
+  resulting version, plus a brief explanation of what the three numbers mean.
+- Step 5: the one commit the session made touches `NOTE.txt` and both manifest files
+  together, each now at `0.1.1` — the bump landed inside the same commit `ship` made, not
+  a separate one.
+- Step 6: the final report states the pull request was opened, names the version bumped
+  to (`0.1.1`), and gives the exact `git tag v0.1.1` / `git push origin v0.1.1` commands
+  for after the pull request merges — making clear `ship` ran neither command itself.
+- Step 7: choosing **no bump** leaves both manifest files exactly as step 5 left them —
+  nothing in this commit touches them — and the final report says nothing about a tag.
+- Step 8: this project has no `.claude-plugin/marketplace.json` at all, so the detector
+  would report `"found": false`; `ship` asks exactly the single yes/no question it asked
+  before this change, with nothing about a version in it, and its final report says
+  nothing about a tag or a bumped version — proving the no-manifest project is left
+  exactly as it would have been without this change.
