@@ -40,7 +40,10 @@ question, because there is nothing here for them to act on. Then move straight o
 Ask what the person is trying to do, and think it through with them: what problem it
 solves, what it would touch, what could make it harder than it looks, whether it is one
 change or several. Use `docs/PLAN.md` (or the equivalent project context) to ground the
-discussion in what already exists, rather than treating the idea in a vacuum.
+discussion in what already exists, rather than treating the idea in a vacuum. If the
+person points at something already written down in `docs/ideas.md` — by its title or by
+description — read that entry first and start from what it already says, rather than
+asking them to restate it.
 
 ## 3. Leave it to the person
 

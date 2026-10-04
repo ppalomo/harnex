@@ -1,15 +1,23 @@
 ---
 name: ship
-description: Commit a verified change, open its pull request, then archive it and sync its specs after the person's explicit yes. Use when the person wants to ship a verified change.
+description: Commit what is pending on this branch, open its pull request, and — when the branch has its own openspec/ change — archive it and sync its specs, all after the person's explicit yes. Use when the person wants to ship a verified change, or to publish whatever a /harnex:flash or a hand-made edit left in the working tree.
 ---
 
 # Shipping a change
 
-You turn a fresh, clean `verify` review into the change's commit and pull request, then
-archive the change. The gate is authoritative: do not begin any write or publication step
-until it says the exact working tree is safe to ship and the person has explicitly said yes.
+You turn what is sitting on this branch into a commit and a pull request. Two shapes reach
+you here, and step 1 decides which:
 
-## 1. Check the fresh `verify` review before doing anything else
+- **A change with its own `openspec/` artifacts** (`propose` → `apply` → `verify` ran) —
+  the gated path, section 2 below. The gate is authoritative: do not begin any write or
+  publication step until it says the exact working tree is safe to ship and the person has
+  explicitly said yes.
+- **A branch with no `openspec/` change behind it** — what `/harnex:flash` or an ordinary
+  hand-edit leaves — the direct path, section 3 below. There is no proposal to read a
+  title or description from, and nothing for `/harnex:verify` to have gated, so there is
+  nothing to check before asking; the diff itself is what you commit, push, and describe.
+
+## 1. Name the change, and decide which path applies
 
 Name the change from the current branch:
 
@@ -20,13 +28,20 @@ git branch --show-current
 Use that branch name as `<change-name>`. Read the project's recorded choices
 (`.harnex/config.yml` if it exists — `local` visibility — otherwise `.harnex.yml`); under
 `local` visibility, resolve the store named by the recorded `store_id`
-(`openspec store list --json`, matched by `id`) and read `proposal.md` and run
-`openspec archive` against it below, passing `--store <store_id>`. Confirm the change's
-own directory exists — `openspec/changes/<change-name>/`, under the project or, under
-`local` visibility, under that store's own root; if it does not, say so plainly and stop
-rather than guessing the change path. Run the gate,
-capturing its stdout, stderr, and exit status separately because a refusal exits non-zero
-while still printing its result:
+(`openspec store list --json`, matched by `id`). Check whether the change's own directory
+exists — `openspec/changes/<change-name>/` under the project (`shared` visibility) or under
+that store's own root (`local`).
+
+- If it exists, continue with **section 2, the gated path**.
+- If it does not, continue with **section 3, the direct path** — this is not an error; most
+  branches made by `/harnex:flash`, or by hand, never had one.
+
+## 2. The gated path: a change with its own `openspec/` artifacts
+
+### 2.1 Check the fresh `verify` review before doing anything else
+
+Run the gate, capturing its stdout, stderr, and exit status separately because a refusal
+exits non-zero while still printing its result:
 
 ```
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/ship_gate.py" check --project . --change <change-name>
@@ -49,7 +64,7 @@ For every refusal, stop. Do not commit, push, open a pull request, archive the c
 sync specs. If the command fails without a parseable JSON result, report its stdout and
 stderr plainly and stop rather than guessing whether the change is safe.
 
-## 2. Show advisory findings and ask once for the person's explicit yes
+### 2.2 Show advisory findings and ask once for the person's explicit yes
 
 Only when `"decision": "go"`, show every finding in `findings` unchanged. These are
 advisory findings: a blocking finding would have made the gate refuse.
@@ -61,7 +76,7 @@ findings are part of the decision. Wait for an explicit yes.
 If the person says no, or does not give an explicit yes, stop. Do not commit, push, open a
 pull request, archive the change, or sync specs. Do not ask again.
 
-## 3. Commit the change
+### 2.3 Commit the change
 
 Before attempting a commit, check whether the tree has anything to commit:
 
@@ -70,12 +85,12 @@ git status --porcelain=v1 --untracked-files=all
 ```
 
 If its output is empty, the tree is already clean relative to `HEAD`. This is normal when
-re-running after a pull-request failure: skip the commit step and proceed to step 4. If it
-has output, continue with the commit.
+re-running after a pull-request failure: skip the commit step and proceed to 2.4. If it has
+output, continue with the commit.
 
-Read `proposal.md` (resolved in step 1 — the project's own `openspec/changes/<change-name>/`
-under `shared` visibility, the store's under `local`) and use it to derive a conventional,
-English commit message. Check the repository's recent style before committing:
+Read `proposal.md` (the project's own `openspec/changes/<change-name>/` under `shared`
+visibility, the store's under `local`) and use it to derive a conventional, English commit
+message. Check the repository's recent style before committing:
 
 ```
 git log --oneline -5
@@ -92,7 +107,7 @@ Do not add an AI author or co-author line to the commit message. If this commit 
 there is something to commit, report the failure plainly and stop; do not push, open a pull
 request, archive, or sync specs.
 
-## 4. Push the branch
+### 2.4 Push the branch
 
 Check whether the branch already has an upstream:
 
@@ -115,7 +130,7 @@ git push -u origin <change-name>
 If the push fails, report the failure plainly and stop. Do not open a pull request, archive
 the change, or sync specs.
 
-## 5. Open the pull request with `gh`
+### 2.5 Open the pull request with `gh`
 
 Read the same proposal again and derive the pull-request title and body from it. Put the
 proposal-derived body in a temporary file. Do not add an AI author or co-author line to the
@@ -133,7 +148,7 @@ undo them, archive the change, or sync specs. Tell the person to resolve `gh` an
 `/harnex:ship`; the existing commit and push will not be duplicated. Do not invent separate
 idempotent re-run logic.
 
-## 6. Archive the change and sync its specs
+### 2.6 Archive the change and sync its specs
 
 Only after `gh pr create` succeeds, run:
 
@@ -141,20 +156,97 @@ Only after `gh pr create` succeeds, run:
 openspec archive <change-name> --yes --json
 ```
 
-Add `--store <store_id>` under `local` visibility (step 1's resolved id) — the change
+Add `--store <store_id>` under `local` visibility (section 1's resolved id) — the change
 archives into that store's own `openspec/specs/`, never into this project's. This command
 archives the change and, by default, updates the main specs from its delta specs; do not
 use `--skip-specs`. If it fails, report the archive-and-spec-sync failure plainly. The
 commit, push, and pull request already happened and stand.
 
-## 7. Finish
+Then go to section 4.
 
-Report success plainly: the commit was made, the branch was pushed, the pull request was
-opened with the URL from `gh`, the change was archived, and its specs were synced.
+## 3. The direct path: no `openspec/` change behind this branch
+
+### 3.1 Look at what is pending, and ask once for the person's explicit yes
+
+```
+git status --porcelain=v1 --untracked-files=all
+git diff --stat
+```
+
+If both are empty and the branch has nothing unpushed, tell the person there is nothing to
+ship and stop — this is not a refusal, just nothing to do.
+
+Otherwise, read the actual diff (`git diff`, plus the content of any untracked file) to
+understand what changed — there is no `proposal.md` to read instead — and check the
+repository's own recent style:
+
+```
+git log --oneline -5
+```
+
+From that, derive a conventional, English commit message, and a pull-request title and
+body that say what changed and why, the same way `/harnex:flash` would have. Show the
+person the pending diff and the message you derived, and ask once, explicitly, whether to
+commit, push, and open the pull request. Wait for a clear yes.
+
+If the person says no, or does not give a clear yes, stop. Do not commit, push, or open a
+pull request. Do not ask again.
+
+### 3.2 Commit the change
+
+If `git status --porcelain=v1 --untracked-files=all` came back empty in 3.1, the tree is
+already clean relative to `HEAD` — this is normal when re-running after a pull-request
+failure — skip straight to 3.3. Otherwise commit with the message derived in 3.1:
+
+```
+git add -A
+git commit -m "<conventional English message>"
+```
+
+Do not add an AI author or co-author line to the commit message. If this commit fails while
+there is something to commit, report the failure plainly and stop; do not push or open a
+pull request.
+
+### 3.3 Push the branch
+
+Check whether the branch already has an upstream:
+
+```
+git rev-parse --abbrev-ref --symbolic-full-name @{u}
+```
+
+If it has one, push normally (`git push`); if it has none, run
+`git push -u origin <change-name>`. If the push fails, report the failure plainly and stop.
+Do not open a pull request.
+
+### 3.4 Open the pull request with `gh`
+
+Put the title and body derived in 3.1 in a temporary file for the body, with no AI author or
+co-author line in either, and use the installed, authenticated `gh` CLI:
+
+```
+gh pr create --title "<derived title>" --body-file <derived-body-file>
+```
+
+Keep the URL that `gh pr create` prints. If `gh` is missing, unauthenticated, or
+`gh pr create` otherwise fails, report that the pull-request step failed and why. The
+commit and push already happened and stand; do not undo them. Tell the person to resolve
+`gh` and re-run `/harnex:ship`; the existing commit and push will not be duplicated.
+
+There is nothing to archive and no specs to sync for this path — there was never a change
+under `openspec/` to begin with. Go to section 4.
+
+## 4. Finish
+
+Report success plainly: the commit was made, the branch was pushed, and the pull request
+was opened with the URL from `gh`. For the gated path only, add that the change was
+archived and its specs were synced.
 
 ## What this skill never does
 
-- Commit without the person's explicit yes.
+- Commit without the person's explicit yes, on either path.
 - Proceed past a `gh` failure.
 - Ask for yes twice.
-- Run `openspec archive` before the person's yes.
+- Run `openspec archive` before the person's yes, or for a change that never had an
+  `openspec/` directory to begin with.
+- Invent an `openspec/` change to make the direct path look like the gated one.

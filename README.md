@@ -72,6 +72,10 @@ claude plugin install harnex@harnex
 claude plugin install codex@openai-codex
 ```
 
+`claude plugin install` defaults to **user** scope: the plugin becomes available to every
+project you open on this machine, not just the one you ran it from. Pass `--scope project`
+or `--scope local` instead if you want it scoped differently.
+
 Once per project, new or existing, from inside Claude Code:
 
 ```
@@ -104,6 +108,22 @@ choices `/harnex:setup` already recorded in `.harnex.yml`. It asks no question a
 touches a file the project owns. In a project that never ran setup, the plugin does
 nothing.
 
+To see which version is installed:
+
+```bash
+claude plugin list
+claude plugin details harnex
+```
+
+To check whether a newer one is available, refresh the marketplace's own metadata first —
+`claude plugin update` only ever installs what the marketplace currently points at, it
+never checks upstream on its own:
+
+```bash
+claude plugin marketplace update harnex
+claude plugin list --available --json   # compare the installed and available versions
+```
+
 With the project harnessed, five commands take a change from idea to pull request, each
 run from inside Claude Code, in the order a change normally moves through them:
 
@@ -118,6 +138,20 @@ run from inside Claude Code, in the order a change normally moves through them:
 That is every step: the machine-level install, `/harnex:setup`, and one pass through the
 five commands above reach a harnessed project with a shipped change, with no other
 document needed.
+
+Two more commands sit outside that pipeline, for things too small to be worth it:
+
+| Command | Does |
+|---|---|
+| `/harnex:idea "…"` | Jot a one-line idea into `docs/ideas.md`, the project's own running backlog — nothing under `openspec/`, nothing to explore yet. |
+| `/harnex:flash "…"` | Implement a small, already-understood change right here, right now — no proposal, no builder, no `openspec/` change. |
+
+`/harnex:flash` never commits, pushes, or opens a pull request itself: run `/harnex:ship`
+once the change is ready. `/harnex:ship` recognises a branch with no `openspec/` change
+behind it — what `/harnex:flash` or a hand-made edit leaves — and publishes it the same
+way it ships a verified change, except it infers the commit message and the pull-request
+title and body from the diff itself, since there is no `proposal.md` to read them from,
+and there is nothing to archive afterwards.
 
 ## 🛠 Developing harnex
 
