@@ -6,6 +6,12 @@ design.md, D4, Open Question resolved). CI reacts to the pushed tag; it never cr
 
 ## Steps
 
+Steps 1–3 are normally already done for you: `/harnex:ship` asks a version-bump question
+(no bump, patch, minor or major, each showing the resulting version) and, if a bump is
+chosen, writes it into both manifests and includes that write in the commit `ship` already
+makes. They are manual steps only for a release cut that did not go through `ship` — for
+example, cutting a release from a commit that landed outside any `ship` run.
+
 1. **Bump both manifests to the same version.** Edit the `version` field in each of:
    - `plugin/.claude-plugin/plugin.json` (`version`)
    - `.claude-plugin/marketplace.json` (`plugins[0].version`, the `"harnex"` entry under

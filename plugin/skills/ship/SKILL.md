@@ -64,6 +64,16 @@ For every refusal, stop. Do not commit, push, open a pull request, archive the c
 sync specs. If the command fails without a parseable JSON result, report its stdout and
 stderr plainly and stop rather than guessing whether the change is safe.
 
+Only once the gate's decision is `"go"`, also run the version-bump detector, capturing its
+stdout:
+
+```
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/version_bump.py" detect --project .
+```
+
+Parse stdout as its one JSON object and note whether its `found` field is `true` or
+`false` — section 2.2 uses it when framing the confirmation ask below.
+
 ### 2.2 Show advisory findings and ask once for the person's explicit yes
 
 Only when `"decision": "go"`, show every finding in `findings` unchanged. These are
@@ -71,7 +81,24 @@ advisory findings: a blocking finding would have made the gate refuse.
 
 Then ask the person once whether to proceed with committing, pushing, opening the pull
 request, archiving the change, and syncing its specs. Make clear that those advisory
-findings are part of the decision. Wait for an explicit yes.
+findings are part of the decision.
+
+If the version-bump detector run in 2.1 reported `"found": true`, fold the version-bump
+question into this same ask — one ask, not two. Briefly explain what the three numbers in
+a version `X.Y.Z` mean (major, minor, patch), then offer four choices, each stated with
+the exact resulting version from that `detect` call's own `candidates`:
+
+- no bump — stay on the current version (`current_version`)
+- patch (`<current_version> -> <candidates.patch>`)
+- minor (`<current_version> -> <candidates.minor>`)
+- major (`<current_version> -> <candidates.major>`)
+
+Make explicit that declining to ship means nothing happens at all, including no version
+bump, whatever was chosen for the version question. If `detect` reported
+`"found": false`, the ask is unchanged from today: a single yes/no question, with nothing
+about a version in it.
+
+Wait for an explicit yes.
 
 If the person says no, or does not give an explicit yes, stop. Do not commit, push, open a
 pull request, archive the change, or sync specs. Do not ask again.
@@ -95,6 +122,20 @@ message. Check the repository's recent style before committing:
 ```
 git log --oneline -5
 ```
+
+If the version-bump detector in 2.1 reported `"found": true` and the person chose patch,
+minor, or major in 2.2's combined ask, run the bump before staging anything:
+
+```
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/version_bump.py" bump --project . --level <level>
+```
+
+substituting the chosen level for `<level>`. This writes the manifest files the detector
+found; they are picked up by the `git add -A` below. If it exits 1 with a JSON error —
+its own re-detection no longer finds the same, single, agreeing manifest, because the tree
+moved since 2.1's `detect` call — report that plainly and stop; do not commit. If the
+person chose no bump, or `detect` reported `"found": false` in 2.1, skip this step
+entirely: do not run `bump`.
 
 Commit with the resulting message:
 
@@ -184,10 +225,36 @@ repository's own recent style:
 git log --oneline -5
 ```
 
+Also run the version-bump detector, capturing its stdout:
+
+```
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/version_bump.py" detect --project .
+```
+
+Parse stdout as its one JSON object and note whether its `found` field is `true` or
+`false` — it is part of what the confirmation ask below covers.
+
 From that, derive a conventional, English commit message, and a pull-request title and
 body that say what changed and why, the same way `/harnex:flash` would have. Show the
 person the pending diff and the message you derived, and ask once, explicitly, whether to
-commit, push, and open the pull request. Wait for a clear yes.
+commit, push, and open the pull request.
+
+If the version-bump detector run above reported `"found": true`, fold the version-bump
+question into this same ask — one ask, not two. Briefly explain what the three numbers in
+a version `X.Y.Z` mean (major, minor, patch), then offer four choices, each stated with
+the exact resulting version from that `detect` call's own `candidates`:
+
+- no bump — stay on the current version (`current_version`)
+- patch (`<current_version> -> <candidates.patch>`)
+- minor (`<current_version> -> <candidates.minor>`)
+- major (`<current_version> -> <candidates.major>`)
+
+Make explicit that declining to ship means nothing happens at all, including no version
+bump, whatever was chosen for the version question. If `detect` reported
+`"found": false`, the ask is unchanged from today: a single yes/no question, with nothing
+about a version in it.
+
+Wait for a clear yes.
 
 If the person says no, or does not give a clear yes, stop. Do not commit, push, or open a
 pull request. Do not ask again.
@@ -196,7 +263,22 @@ pull request. Do not ask again.
 
 If `git status --porcelain=v1 --untracked-files=all` came back empty in 3.1, the tree is
 already clean relative to `HEAD` — this is normal when re-running after a pull-request
-failure — skip straight to 3.3. Otherwise commit with the message derived in 3.1:
+failure — skip straight to 3.3. Otherwise, if the version-bump detector in 3.1 reported
+`"found": true` and the person chose patch, minor, or major in that same ask, run the bump
+before staging anything:
+
+```
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/version_bump.py" bump --project . --level <level>
+```
+
+substituting the chosen level for `<level>`. This writes the manifest files the detector
+found; they are picked up by the `git add -A` below. If it exits 1 with a JSON error —
+its own re-detection no longer finds the same, single, agreeing manifest, because the tree
+moved since 3.1's `detect` call — report that plainly and stop; do not commit. If the
+person chose no bump, or `detect` reported `"found": false` in 3.1, skip this step
+entirely: do not run `bump`.
+
+Commit with the message derived in 3.1:
 
 ```
 git add -A
@@ -242,6 +324,19 @@ Report success plainly: the commit was made, the branch was pushed, and the pull
 was opened with the URL from `gh`. For the gated path only, add that the change was
 archived and its specs were synced.
 
+If a version bump was made in 2.3 or 3.2 — the person chose patch, minor, or major and
+`bump` succeeded — also state the exact version it bumped to, and the exact commands the
+person should run once this pull request merges:
+
+```
+git tag vX.Y.Z
+git push origin vX.Y.Z
+```
+
+substituting the new version for `X.Y.Z`. Make clear that `ship` does not run these
+itself — it only states them — because `ship` never merges the pull request, so the tag
+has to wait until the person has done that themselves.
+
 ## What this skill never does
 
 - Commit without the person's explicit yes, on either path.
@@ -250,3 +345,6 @@ archived and its specs were synced.
 - Run `openspec archive` before the person's yes, or for a change that never had an
   `openspec/` directory to begin with.
 - Invent an `openspec/` change to make the direct path look like the gated one.
+- Cut or push a release tag, or open a GitHub release, on its own — it never merges the
+  pull request it opens, so it cannot confirm the tag would name a commit actually on
+  `main`; it only states the commands in its final report.
