@@ -638,8 +638,8 @@ def test_ship_passes_store_to_archive(plugin_root: Path) -> None:
 
 
 def test_explore_and_review_never_mention_a_store_or_changes_root(plugin_root: Path) -> None:
-    """Neither skill ever calls `openspec`, so there is no store to resolve."""
-    for name in ("explore", "review"):
+    """None of these skills ever call `openspec`, so there is no store to resolve."""
+    for name in ("explore", "review", "idea", "flash"):
         text = _skill_text(plugin_root, name)
         assert "--store" not in text
         assert "--changes-root" not in text
