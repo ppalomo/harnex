@@ -102,10 +102,10 @@ HARNEX_IGNORE_BODY = """\
 CLAUDE_LOCAL_BODY_MARKER = "@.harnex/rules.md"
 
 CODEX_LOCAL_NOTICE = (
-    "Codex is among the active tools, but under local visibility it cannot see this "
-    "project's rules: the Codex builder binding reads them from `AGENTS.md`, which "
-    "local visibility never touches. Codex is not blocked — it will still build — it "
-    "simply will not have read the rules first."
+    "Codex is among the active tools. Under local visibility the apply loop "
+    "(`/harnex:apply`) hands Codex the rules: its prompt starts with an instruction to "
+    "read `.harnex/rules.md` and follow it. Codex used outside apply will not have "
+    "them, since `AGENTS.md` is never written under local visibility."
 )
 
 MANIFEST_FORMAT = 1
@@ -164,6 +164,9 @@ class Answers:
     visibility: str = "shared"
     tools: tuple[str, ...] = ()
     store_id: str = ""
+    # An answer of this run only (design.md D2): where `openspec store setup` registers the
+    # store. It is planned, never recorded — `.harnex/config.yml` keeps the id alone.
+    store_path: str = ""
     global_instructions: bool = False
 
     def as_choices(self) -> dict[str, object]:
@@ -242,7 +245,7 @@ def read_answers(text: str, plugin_root: Path) -> Answers:
     approvals = raw.get("approvals", {})
     if not isinstance(approvals, dict):
         raise SetupError("`approvals` must be an object")
-    local_keys = {"visibility", "tools", "store_id"}
+    local_keys = {"visibility", "tools", "store_id", "store_path"}
     unknown_keys = sorted(set(raw) - set(ANSWER_KEYS) - local_keys - {"approvals"})
     if unknown_keys:
         raise SetupError(
@@ -271,6 +274,9 @@ def read_answers(text: str, plugin_root: Path) -> Answers:
     store_id = raw.get("store_id", "")
     if not isinstance(store_id, str):
         raise SetupError("`store_id` must be text")
+    store_path = raw.get("store_path", "")
+    if not isinstance(store_path, str):
+        raise SetupError("`store_path` must be text")
 
     answers = Answers(
         project_name=str(values["project_name"]),
@@ -287,6 +293,7 @@ def read_answers(text: str, plugin_root: Path) -> Answers:
         visibility=visibility,
         tools=tuple(tools_raw),
         store_id=store_id,
+        store_path=store_path,
         global_instructions=bool(approvals.get("global_instructions", False)),
     )
     validate_answers(answers, plugin_root)
@@ -355,6 +362,11 @@ def validate_answers(answers: Answers, plugin_root: Path) -> None:
     if answers.visibility != "local" and answers.store_id.strip():
         raise SetupError(
             "`store_id` is answered but `visibility` is not `local`; it would be read "
+            "by nothing"
+        )
+    if answers.visibility != "local" and answers.store_path.strip():
+        raise SetupError(
+            "`store_path` is answered but `visibility` is not `local`; it would be read "
             "by nothing"
         )
     for path in answers.adopt:
@@ -632,6 +644,13 @@ ADOPT = "adopt"
 MERGE = "merge"
 CONFLICT = "conflict"
 MISSING = "missing"
+REGISTER = "register"
+# `git init` under local visibility when the project has no repository (design.md D4): a
+# plan line with nothing for `write` to write, run by the skill after the yes, and the
+# exclude entries that wait on it.
+INIT = "init"
+PENDING = "pending"
+GIT_DIR = ".git"
 
 
 @dataclass
@@ -694,6 +713,8 @@ def build_plan(
 
     _plan_project_files(plan, project, plugin_root, answers, mode)
     _plan_harness_files(plan, project, answers, desired, why, recorded_paths, record is None)
+    if _env_excluded(project, answers):
+        _plan_git_exclude(plan, project, (ENV_FILE,))
     owned = _plan_settings(plan, project, plugin_root, record)
     mcp_owned = _plan_mcp(plan, project, plugin_root, answers, record)
     _plan_record(plan, project, desired, owned, mcp_owned)
@@ -779,18 +800,57 @@ def _plan_project_files(
                 )
             )
 
-    _maybe_jev_notice(plan, answers)
+    _maybe_jev_notice(plan, project, answers)
 
 
-def _maybe_jev_notice(plan: Plan, answers: Answers) -> None:
-    if answers.decision_model == "jev":
-        plan.notices.append(
-            f"{ENV_FILE} at the project root is where the `jev` backend falls back to look "
-            "for the key when the environment variable is unset. It must declare the line "
-            "`OPENROUTER_API_KEY=` followed by the value, and it is the person's own "
-            f"responsibility to keep {ENV_FILE} out of version control. Setup does not "
-            f"read, write, or gitignore {ENV_FILE} itself."
+def _git_init_pending(project: Path, answers: Answers) -> bool:
+    """Under local visibility a missing repository is created by the skill, after the
+    yes and before `write` (design.md D4); under `shared` it is never setup's to create."""
+    return answers.visibility == "local" and not (project / GIT_DIR).is_dir()
+
+
+def _env_excluded(project: Path, answers: Answers) -> bool:
+    """`.env` joins the repository's own exclude list when `jev` is chosen and the
+    project is a git repository, under either visibility (design.md D3), or will be one
+    once the planned `git init` has run (D4). The entry is planned whether or not `.env`
+    exists yet: the person creates it next."""
+    return answers.decision_model == "jev" and (
+        (project / GIT_DIR).is_dir() or _git_init_pending(project, answers)
+    )
+
+
+def _maybe_jev_notice(plan: Plan, project: Path, answers: Answers) -> None:
+    if answers.decision_model != "jev":
+        return
+    notice = (
+        f"{ENV_FILE} at the project root is where the `jev` backend falls back to look "
+        "for the key when the environment variable is unset. It must declare the line "
+        "`OPENROUTER_API_KEY=` followed by the value. "
+    )
+    if _git_init_pending(project, answers) and _env_excluded(project, answers):
+        notice += (
+            f"Setup adds {ENV_FILE} to {GIT_EXCLUDE} once `git init` has created the "
+            "repository, in this same run and before any commit can exist, whether or not "
+            "the file exists yet."
         )
+    elif _env_excluded(project, answers):
+        notice += (
+            f"Setup adds {ENV_FILE} to {GIT_EXCLUDE}, so git ignores it in this clone, "
+            "whether or not the file exists yet."
+        )
+        if answers.visibility == "shared":
+            notice += (
+                f" That exclusion protects this clone only: every other clone has its own "
+                f"exclude list, and keeping {ENV_FILE} out of version control there is "
+                "each person's own responsibility."
+            )
+    else:
+        notice += (
+            f"This is not a git repository, so it is the person's own responsibility to "
+            f"keep {ENV_FILE} out of version control."
+        )
+    notice += f" Setup does not read, write, or gitignore {ENV_FILE} itself."
+    plan.notices.append(notice)
 
 
 def _plan_harness_files(
@@ -1106,7 +1166,7 @@ def _plan_local_config(
     else:
         plan.steps.append(Step(LOCAL_CHOICES, "project", KEEP, "the project's own, left alone"))
 
-    _maybe_jev_notice(plan, answers)
+    _maybe_jev_notice(plan, project, answers)
 
 
 # Every local-visibility path that cannot live inside a self-ignoring directory
@@ -1114,15 +1174,42 @@ def _plan_local_config(
 GIT_EXCLUDE_PATHS = (CLAUDE_LOCAL, SETTINGS_LOCAL)
 
 
-def _plan_git_exclude(plan: Plan, project: Path) -> None:
+def _plan_git_exclude(
+    plan: Plan, project: Path, paths: tuple[str, ...], git_init_pending: bool = False
+) -> None:
     """Keep every root-level local-visibility path out of git without ever touching the
     project's own ignore file (local-visibility spec: "a path that cannot live inside [a
     self-ignoring directory]... excluded through an entry the harness adds to
-    `.git/info/exclude`")."""
-    if not (project / ".git").is_dir():
+    `.git/info/exclude`"). The same entry list carries `.env` when `jev` is chosen, under
+    either visibility (design.md D3); the caller decides which paths it holds.
+
+    With no repository under local visibility, the entries wait on a `git init` step the
+    skill runs after the yes (design.md D4): both are plan lines with nothing to write, and
+    `write`'s own re-survey finds `.git` and plans the entries as an ordinary write."""
+    if git_init_pending:
+        plan.steps.append(
+            Step(
+                GIT_DIR,
+                "local",
+                INIT,
+                "no repository here: `git init` creates one after your yes, before anything "
+                "is written",
+            )
+        )
+        plan.steps.append(
+            Step(
+                GIT_EXCLUDE,
+                "local",
+                PENDING,
+                f"{', '.join(paths)} to be added to the repository's own local exclude "
+                "list once `git init` has run",
+            )
+        )
+        return
+    if not (project / GIT_DIR).is_dir():
         plan.steps.append(Step(GIT_EXCLUDE, "local", CONFLICT, "no .git directory here"))
         plan.conflicts.append(
-            f"Local visibility excludes {', '.join(GIT_EXCLUDE_PATHS)} through "
+            f"Local visibility excludes {', '.join(paths)} through "
             f"{GIT_EXCLUDE}, which needs a git repository. Run `git init` first, or "
             "choose `shared` visibility."
         )
@@ -1132,10 +1219,10 @@ def _plan_git_exclude(plan: Plan, project: Path) -> None:
     current = _read(exclude_path)
     text = current.decode("utf-8", errors="replace") if current is not None else ""
     existing = set(text.splitlines())
-    missing = [path for path in GIT_EXCLUDE_PATHS if path not in existing]
+    missing = [path for path in paths if path not in existing]
     if not missing:
         plan.steps.append(
-            Step(GIT_EXCLUDE, "local", UNCHANGED, f"{', '.join(GIT_EXCLUDE_PATHS)} already excluded")
+            Step(GIT_EXCLUDE, "local", UNCHANGED, f"{', '.join(paths)} already excluded")
         )
         return
 
@@ -1167,11 +1254,47 @@ def _plan_local_mcp_notice(plan: Plan, plugin_root: Path, answers: Answers) -> N
     )
 
 
-def _plan_local_store(plan: Plan, answers: Answers) -> None:
+def _recorded_store_id(project: Path) -> str:
+    """The store id `.harnex/config.yml` already records, or nothing if there is none."""
+    current = _read(project / LOCAL_CHOICES)
+    if current is None:
+        return ""
+    values = parse_choices(
+        current.decode("utf-8", errors="replace"),
+        LOCAL_CHOICES,
+        LOCAL_ANSWER_KEYS,
+        LOCAL_LIST_KEYS,
+    )
+    return str(values["store_id"]).strip()
+
+
+def _plan_local_store(
+    plan: Plan, project: Path, answers: Answers, mode: Literal["setup", "update"]
+) -> None:
     """No file inside the project names the store (design.md D5) — this is purely the
     plan's own transparency line, the same "every surveyed path says what happens to it"
     principle extended to the one piece of local visibility that lives outside any path
-    at all."""
+    at all.
+
+    A `store_path` turns the line into the registration the skill runs after the yes
+    (design.md D2); this script never shells out to do it. Without a recorded store id
+    there is nothing to reuse, so the path is the one answer that cannot be empty."""
+    if answers.store_path.strip():
+        plan.steps.append(
+            Step(
+                "openspec store",
+                "local",
+                REGISTER,
+                f"register store `{answers.store_id}` at `{answers.store_path}`; this "
+                "project's own propose/apply/verify/ship work uses it",
+            )
+        )
+        return
+    if mode == "setup" and not _recorded_store_id(project):
+        raise SetupError(
+            "`visibility` is `local` and no store id is recorded yet, so `store_path` is "
+            "needed: it is where `openspec store setup` registers the store"
+        )
     plan.steps.append(
         Step(
             "openspec store",
@@ -1184,6 +1307,7 @@ def _plan_local_store(plan: Plan, answers: Answers) -> None:
 
 
 _INSTRUCTION_FILES_TARGET = "claude-md-and-agents-md"
+_INSTRUCTION_FILES_SETTING = '`pluginConfigs."agents-md@builtin".options.instructionFiles`'
 
 
 def _plan_global_instructions(plan: Plan, home: Path, answers: Answers) -> None:
@@ -1230,7 +1354,16 @@ def _plan_global_instructions(plan: Plan, home: Path, answers: Answers) -> None:
         return
 
     if not answers.global_instructions:
-        plan.steps.append(Step(label, "home", KEEP, "not yet approved this run"))
+        plan.steps.append(
+            Step(
+                label,
+                "home",
+                KEEP,
+                f"would set {_INSTRUCTION_FILES_SETTING} = \"{_INSTRUCTION_FILES_TARGET}\"; "
+                "written only on its own yes (`global_instructions`), not on the plan's "
+                "yes — not approved this run",
+            )
+        )
         plan.notices.append(
             f"{label}: without `pluginConfigs.\"agents-md@builtin\".options.instructionFiles` "
             f'set to "{_INSTRUCTION_FILES_TARGET}", this project\'s own {CLAUDE_LOCAL} will '
@@ -1252,7 +1385,8 @@ def _plan_global_instructions(plan: Plan, home: Path, answers: Answers) -> None:
             label,
             "home",
             MERGE,
-            "instructionFiles set so AGENTS.md keeps loading alongside CLAUDE.local.md",
+            f"sets {_INSTRUCTION_FILES_SETTING} = \"{_INSTRUCTION_FILES_TARGET}\" so "
+            "AGENTS.md keeps loading alongside CLAUDE.local.md",
             _settings_bytes(merged),
         )
     )
@@ -1292,10 +1426,11 @@ def _build_local_plan(
     _plan_local_entry_files(plan, project)
     _plan_local_config(plan, project, plugin_root, answers, mode)
     _plan_harness_files(plan, project, answers, desired, why, recorded_paths, record is None)
-    _plan_git_exclude(plan, project)
+    exclude_paths = GIT_EXCLUDE_PATHS + ((ENV_FILE,) if _env_excluded(project, answers) else ())
+    _plan_git_exclude(plan, project, exclude_paths, _git_init_pending(project, answers))
     owned = _plan_settings(plan, project, plugin_root, record, target=SETTINGS_LOCAL, owner="local")
     _plan_local_mcp_notice(plan, plugin_root, answers)
-    _plan_local_store(plan, answers)
+    _plan_local_store(plan, project, answers, mode)
     if mode == "setup":
         _plan_global_instructions(plan, home, answers)
     _plan_record(plan, project, desired, owned, {})
@@ -1348,6 +1483,14 @@ def write_atomic(path: Path, data: bytes) -> None:
 def apply_plan(plan: Plan) -> list[str]:
     if plan.conflicts:
         raise SetupError("the plan has conflicts, so nothing was written")
+    if any(step.action == INIT for step in plan.steps):
+        # The plan still waits on `git init` (design.md D4): writing now would leave the
+        # exclude entries unwritten while the rest landed, so nothing is written at all.
+        raise SetupError(
+            "there is no git repository here yet, so the exclude entries cannot be written; "
+            "run `git init` (the plan's own step) and then write, or choose `shared` "
+            "visibility. Nothing was written"
+        )
     written = []
     for step in plan.steps:
         if step.data is None:

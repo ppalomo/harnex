@@ -651,23 +651,25 @@ on one with its own existing, committed `AGENTS.md`.
    git add -A && git commit -qm "existing brief"
    cd ~/Developer/harnex
    ```
-2. Register a local OpenSpec store for it and build the answers document, `store_id`
-   included:
+2. Build the answers document, `store_id` and `store_path` included — the store is not
+   registered yet; since `C9` that is a line of the plan, run only after the yes to it:
    ```bash
-   openspec store setup harnex-local-smoke --path /tmp/harnex-local-store --json
    cat > /tmp/harnex-local-answers.json <<'JSON'
    {"project_name": "local-smoke", "profiles": [], "sets": ["git", "sdd"], "features": [],
     "canary": "", "decision_model": "mock", "check_command": "make check",
     "approvals": {"pointer_agents": false, "pointer_claude": false, "adopt": []},
-    "visibility": "local", "tools": ["claude"], "store_id": "harnex-local-smoke"}
+    "visibility": "local", "tools": ["claude"], "store_id": "harnex-local-smoke",
+    "store_path": "/tmp/harnex-local-store"}
    JSON
    ```
-3. Plan, then write, with a scratch home directory so the one global offer never touches
-   your own `~/.claude/settings.json`:
+3. Plan, register the store the plan names (what the skill does after your yes), then
+   write, with a scratch home directory so the one global offer never touches your own
+   `~/.claude/settings.json`:
    ```bash
    mkdir -p /tmp/harnex-local-home
    uv run plugin/scripts/setup.py plan --answers /tmp/harnex-local-answers.json \
      --project /tmp/harnex-local --home /tmp/harnex-local-home
+   openspec store setup harnex-local-smoke --path /tmp/harnex-local-store --json
    uv run plugin/scripts/setup.py write --answers /tmp/harnex-local-answers.json \
      --project /tmp/harnex-local --home /tmp/harnex-local-home
    ```
@@ -679,10 +681,13 @@ on one with its own existing, committed `AGENTS.md`.
    cat /tmp/harnex-local/CLAUDE.local.md
    cat /tmp/harnex-local/.git/info/exclude
    ```
-5. Run setup again, unchanged: nothing is proposed, and the recorded `store_id` would be
-   reused rather than registering a second store:
+5. Run setup again with `store_path` left empty, as the skill does once a `store_id` is
+   recorded: nothing is proposed, and the recorded `store_id` is reused rather than
+   registering a second store:
    ```bash
-   uv run plugin/scripts/setup.py plan --answers /tmp/harnex-local-answers.json \
+   sed 's|"/tmp/harnex-local-store"|""|' /tmp/harnex-local-answers.json \
+     > /tmp/harnex-local-rerun.json
+   uv run plugin/scripts/setup.py plan --answers /tmp/harnex-local-rerun.json \
      --project /tmp/harnex-local --home /tmp/harnex-local-home
    ```
 
@@ -692,16 +697,18 @@ on one with its own existing, committed `AGENTS.md`.
   every surveyed path, whether or not it writes it — but writes only
   `CLAUDE.local.md`, `.harnex/config.yml`, `.harnex/rules.md`, `.harnex/.gitignore`,
   `.git/info/exclude` and `.claude/settings.local.json`; `AGENTS.md`/`CLAUDE.md` never
-  get a write action. A notice about the one global settings offer also appears, since
-  `/tmp/harnex-local-home/.claude/settings.json` does not exist yet.
+  get a write action. It also shows "register store `harnex-local-smoke` at
+  `/tmp/harnex-local-store`" as a step, and the global settings offer as a line naming
+  `pluginConfigs."agents-md@builtin".options.instructionFiles` and its value, not
+  approved — `/tmp/harnex-local-home/.claude/settings.json` does not exist yet.
 - Step 4: plain `git status --porcelain` prints nothing at all — the existing `AGENTS.md`
   commit is the only history this repository has. `--ignored` shows `.harnex/` and the
   two root-level files as ignored, not merely absent from the listing.
   `/tmp/harnex-local/AGENTS.md` still reads "# an existing team brief", byte for byte.
   `CLAUDE.local.md` holds one line, `@.harnex/rules.md`. `.git/info/exclude` lists both
   `CLAUDE.local.md` and `.claude/settings.local.json`.
-- Step 5: "Nothing to do" — not a second store registration, not a second insertion
-  attempt, not a rewritten `.harnex/config.yml`.
+- Step 5: "Nothing to do" — no "register store" step, not a second insertion attempt,
+  not a rewritten `.harnex/config.yml`.
 
 ---
 

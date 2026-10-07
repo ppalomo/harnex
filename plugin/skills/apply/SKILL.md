@@ -73,7 +73,10 @@ declared paths if it has any, and the project's own check command (read from
   step 2 already checked out, so the call lands in the right tree — the command itself
   takes no `--cwd` of its own to pass. If the person asked for the background form
   instead, record the job id `apply_loop.py`'s run state needs for recovery (step 6)
-  before moving on.
+  before moving on. Under `local` visibility, where no `AGENTS.md` points Codex at the
+  rules, the prompt begins with one sentence — "Read `.harnex/rules.md` in this project
+  and follow it." — then the task's own text; under `shared` visibility it is the task's
+  own text and nothing else.
 - **Human:** tell the person what the task asks for and wait for them to say they are
   done.
 

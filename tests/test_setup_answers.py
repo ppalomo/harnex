@@ -120,6 +120,22 @@ def test_an_answer_the_harness_cannot_honour_is_refused(
     assert says in str(refusal.value)
 
 
+def test_a_store_path_without_local_visibility_is_refused(plugin_root: Path, answers) -> None:
+    answers["store_path"] = "/somewhere/store"
+    with pytest.raises(setup.SetupError) as refusal:
+        setup.read_answers(__import__("json").dumps(answers), plugin_root)
+    assert "`store_path` is answered but `visibility` is not `local`" in str(refusal.value)
+
+
+def test_a_store_path_must_be_text(plugin_root: Path, answers) -> None:
+    answers["visibility"] = "local"
+    answers["store_id"] = "scratch-store"
+    answers["store_path"] = ["/somewhere/store"]
+    with pytest.raises(setup.SetupError) as refusal:
+        setup.read_answers(__import__("json").dumps(answers), plugin_root)
+    assert "`store_path` must be text" in str(refusal.value)
+
+
 def test_an_adoption_of_a_path_the_harness_does_not_own_is_refused(
     plugin_root: Path, answers
 ) -> None:
