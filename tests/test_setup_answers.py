@@ -149,7 +149,7 @@ def test_a_refusal_writes_nothing(project: Path, answers, setup_run) -> None:
     answers["sets"] = ["git", "nope"]
     code, said = setup_run("write", project, answers)
     assert code == 1 and "no such set" in said
-    assert list(project.iterdir()) == []
+    assert [p.name for p in project.iterdir()] == [".git"], "only the fixture's own repository"
 
 
 def test_a_template_with_nothing_to_answer_it_fails_loudly(

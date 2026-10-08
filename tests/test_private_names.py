@@ -151,11 +151,16 @@ def _written(tmp_path: Path, plugin_root: Path) -> list[Path]:
 
     project = tmp_path / "written"
     project.mkdir()
-    from conftest import DEFAULT_ANSWERS
+    from conftest import DEFAULT_ANSWERS, commit_all
 
+    commit_all(project)  # setup plans only on a clean git working tree
     answers = setup.read_answers(json.dumps(DEFAULT_ANSWERS), plugin_root)
     setup.apply_plan(setup.build_plan(project, plugin_root, answers))
-    return [p for p in sorted(project.rglob("*")) if p.is_file()]
+    return [
+        p
+        for p in sorted(project.rglob("*"))
+        if p.is_file() and p.relative_to(project).parts[0] != ".git"
+    ]
 
 
 def test_what_setup_writes_publishes_no_private_shape(tmp_path: Path, plugin_root: Path) -> None:

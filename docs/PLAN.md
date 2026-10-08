@@ -216,9 +216,23 @@ claude plugin install codex@openai-codex          # the official Codex plugin
 export OPENROUTER_API_KEY=...                       # optional: real decision backend
 ```
 
-Setup, once per project, from inside Claude Code: `/harnex:setup`. It asks for profiles,
-rule sets, features, canary word and decision backend, and brings the project to this
-state:
+Setup, once per project, from inside Claude Code: `/harnex:setup`. It runs only inside a
+git repository with nothing to commit apart from the harness's own paths — `git status
+--porcelain` lists nothing else, untracked files included, ignored ones not — under
+either visibility (`C9`). The harness's own paths are the ones setup writes or owns
+(`AGENTS.md`, `CLAUDE.md`, `.harnex.yml`, `.harnex/`, `openspec/config.yaml`,
+`.claude/settings.json`, `.mcp.json`, `CLAUDE.local.md`, `.claude/settings.local.json`),
+so a rerun before the first commit, or after an interrupted run, still goes ahead. The
+repository is found with `git rev-parse`, so a worktree and a project in a subdirectory
+of a repository both work; a subdirectory's status is scoped to its own subtree. Anything
+else is a conflict, shown alongside the rest of the plan and stopping it before it writes
+a file, naming what to do and listing the paths; the skill checks the same thing before
+its first question. Setup never runs `git init`, commits or stashes to get past it. An
+untracked `.env` counts, so a project keeping its key there excludes it (in its own
+`.gitignore` or the repository's exclude list) before running setup. `update` is exempt:
+it refreshes harness-owned paths only and asks nothing. It asks for
+profiles, rule sets, features, canary word and decision backend, and brings the project to
+this state:
 
 | Path | Owner | Committed | Notes |
 |---|---|---|---|
@@ -231,7 +245,7 @@ state:
 | `.mcp.json` | **shared, by entry** | yes | the harness owns the Playwright MCP entry it writes (for a UI profile, on explicit yes), listed in the manifest; every other entry is yours |
 | `openspec/config.yaml` | **project** | yes | created only if missing, with the harness's artifact rules; afterwards only you change it |
 | `.harnex/state/` | runtime | no | decision journal and apply run state; ignored by a `.gitignore` inside the directory itself, so the project's own `.gitignore` is never touched |
-| `.git/info/exclude` | **this clone** | no | only when `decision_model` is `jev` and the project is a git repository: one `.env` entry, added whether or not `.env` exists yet, so the key the `jev` backend falls back to never reaches a commit from this clone (`C9`); it protects this clone only — every other clone has its own exclude list. `.env` itself and the project's own `.gitignore` are never read or written |
+| `.git/info/exclude` | **this clone** | no | only when `decision_model` is `jev`: one `.env` entry in the repository's own exclude list (resolved with `git rev-parse`, so a worktree's or a parent repository's), added whether or not `.env` exists yet, so the key the `jev` backend falls back to never reaches a commit from this clone (`C9`); it protects this clone only — every other clone has its own exclude list. `.env` itself and the project's own `.gitignore` are never read or written |
 
 **Local visibility (`C7`) replaces the table above entirely, never extends it.** Setup
 also asks a `visibility` choice, `shared` (the table above, the default) or `local` — the
@@ -242,7 +256,7 @@ project is not being adopted by a team, only used by the person running it. Unde
 |---|---|---|---|
 | `AGENTS.md`, `CLAUDE.md`, `openspec/config.yaml`, `.claude/settings.json`, `.mcp.json` | **project** | — | never read for insertion, never written; exactly as they were before setup ran |
 | `CLAUDE.local.md` | harness | no | one `@.harnex/rules.md` import; excluded via `.git/info/exclude`, never the project's own `.gitignore` |
-| `.git/info/exclude` | **this clone** | no | lists `CLAUDE.local.md` and `.claude/settings.local.json`, plus `.env` when `decision_model` is `jev` (`C9`); `.env` itself is never read or written. With no `.git` at all, the plan carries a `git init` step and the entries wait on it (`C9`) |
+| `.git/info/exclude` | **local** | no | lists `CLAUDE.local.md` and `.claude/settings.local.json`, plus `.env` when `decision_model` is `jev` (`C9`); `.env` itself is never read or written. The file is the repository's own, resolved with `git rev-parse --git-path info/exclude` — a worktree's common one, a parent repository's for a project in a subdirectory, whose entries are then anchored to the project's own prefix. The repository is always there already: setup requires one and never creates it (`C9`) |
 | `.harnex/config.yml` | **project** | no | your answers, `.harnex.yml`'s own ten-key local cousin — a new path, not a rename; `.harnex.yml` itself is untouched |
 | `.harnex/rules.md`, `.harnex/manifest.json`, `.harnex/state/` | harness / runtime | no | the whole of `.harnex/` ignores itself, not only `state/` |
 | `.claude/settings.local.json` | **local, by entry** | no | the permission floor's entries, Claude Code's own personal/gitignored settings layer |
@@ -253,12 +267,11 @@ project is not being adopted by a team, only used by the person running it. Unde
 operation on that project. No promotion path from `local` to `shared` exists yet.
 
 Every side effect a `local` setup has outside the files it writes is in the one plan the
-person approves (`C9`): `git init` when there is no repository, the store registration,
-and the global setting's line with its exact key and value — shown there, but still
-written only on its own separate yes. The skill runs `git init` and the registration
-after the yes to the plan and before the script writes; there is no second plan.
-Under `shared` visibility a missing `.git` stays a conflict — the repository is not
-setup's to create there.
+person approves (`C9`): the store registration, and the global setting's line with its
+exact key and value — shown there, but still written only on its own separate yes. The
+skill runs the registration after the yes to the plan and before the script writes; there
+is no second plan. A missing repository is never one of them: under either visibility it
+is a conflict, the clean-tree precondition above.
 
 **Entry files belong to the project.** `AGENTS.md` and `CLAUDE.md` are the files each
 tool opens first, and projects already have them. The harness needs exactly one thing
@@ -315,7 +328,9 @@ Update, whenever harnex changes: `claude plugin update harnex` refreshes the beh
   safe — already old or already new — and anything else is an edit and stops it.
 - **A fresh clone works**, because the manifest is committed: every committed path is
   recognised unchanged and nothing is asked. The one path a clone is missing is the runtime
-  state location, which is deliberately not committed, so that is the one thing it restores.
+  state location, which is deliberately not committed, so that is the one thing it restores
+  — and, for a project whose `decision_model` is `jev`, the `.env` entry in the clone's own
+  `.git/info/exclude`, since that file is per clone and never committed (`C9`).
   A project with harness files but no manifest — deleted, or harnessed by hand — is not guessed at: update refuses and
   points to setup, whose adoption shows each difference and asks.
 
@@ -805,7 +820,7 @@ enforces itself. Each is its own OpenSpec change, in this order.
   — this change is what makes `ship` actually ask about it. The real `git tag`/push step
   itself remains the owner's own manual action after a pull request merges, unchanged.
 
-### C9 · setup's local-visibility gaps — **delivered**, change `setup-local-gaps`
+### C9 · setup's local-visibility gaps — **code delivered, manual try owed**, change `setup-local-gaps`
 
 - **Delivers:** four fixes to `C7`'s `local` setup, found by running `/harnex:setup` with
   `local` visibility on a real project, all of one kind — setup decided something that
@@ -815,15 +830,40 @@ enforces itself. Each is its own OpenSpec change, in this order.
   question, proposes no path and never adopts the `openspec` tool's own
   `~/openspec/<id>` suggestion, and the plan shows "register store `<id>` at `<path>`"
   as a step; the answer is planned, never recorded — `.harnex/config.yml` keeps the id
-  alone, and a rerun reuses it without asking. Under `local` visibility with no `.git`,
-  the plan carries a `git init` step instead of a conflict, with the exclude entries
-  pending on it; `write` refuses while that step has not run, so nothing lands half-done.
-  The skill runs `git init` and `openspec store setup <id> --path <path>` only after the
-  person's yes to that one plan and before `write` — no second plan. `.env` joins
-  `.git/info/exclude` when `decision_model` is `jev` and the project is (or is about to
-  be) a git repository, under either visibility, whether or not `.env` exists yet; the
+  alone, and a rerun reuses it without asking. Setup (not `update`) now runs only on a
+  clean git working tree, under either visibility: the script finds the repository with
+  `git rev-parse` — a worktree and a project in a subdirectory both work — and runs
+  `git status --porcelain=v1 --untracked-files=all` during the survey, scoped to the
+  project's own subtree; no repository, a failing `git` or any line naming a path other
+  than the harness's own (`AGENTS.md`, `CLAUDE.md`, `.harnex.yml`, `.harnex/`,
+  `openspec/config.yaml`, `.claude/settings.json`, `.mcp.json`, `CLAUDE.local.md`,
+  `.claude/settings.local.json`) is a conflict, shown first alongside the full plan and
+  stopping the run before any write, naming what to do and listing the paths; `write`'s
+  own re-survey refuses on the same terms. A shared rerun before the person commits, and
+  a rerun after an interrupted setup, still go ahead. The skill checks the same thing
+  before its first question, so the person is not asked anything a plan would refuse,
+  and never runs `git init`, commits or stashes to get past it; it strips the project's
+  own prefix (`git rev-parse --show-prefix`) from each porcelain path before comparing it
+  with the harness's own, so a project in a subdirectory does not stop on its own
+  `AGENTS.md`. An untracked `.env` makes
+  the tree unclean like any other file, so the person excludes it before setup. The
+  exclude file is the repository's own, resolved with
+  `git rev-parse --git-path info/exclude`, and in a subdirectory its entries are anchored
+  to the project's prefix. A `store_path` answered while `.harnex/config.yml` already
+  records a `store_id` is refused, and so is one that resolves inside the project's own
+  directory (`~` expanded, a relative path read against the project root), since
+  registering there would create an `openspec/` directory in the project. The skill runs
+  `openspec store setup <id> --path <path>` only after the person's yes to the one plan
+  and before `write` — no second plan. `.env` joins `.git/info/exclude` when
+  `decision_model` is `jev`, under either visibility, whether or not `.env` exists yet; the
   `jev` notice says so, and under `shared` adds that the exclusion protects this clone
-  only. `.env` itself and the project's `.gitignore` are still never touched. The
+  only. Because that list is per clone, a fresh clone's setup or update run restores the
+  `.env` entry in the clone's own exclude list. Before asking where the store lives, the
+  skill lists the stores already registered (`openspec store list --json`) and reuses one
+  registered under the id it would use, asking no path: it answers `store_registered`
+  (`local` only, refused with a `store_path`, never recorded), the plan shows
+  "reuse store `<id>`" instead of a registration, and `write` records the id. `.env` itself and the project's
+  `.gitignore` are still never touched. The
   global `~/.claude/settings.json` offer becomes a plan line naming its exact key
   (`pluginConfigs."agents-md@builtin".options.instructionFiles`) and value, still
   written only on its own yes, and the skill's final report names every side effect by
@@ -834,33 +874,44 @@ enforces itself. Each is its own OpenSpec change, in this order.
   hands Codex the rules, Codex used outside `apply` will not have them. No
   `AGENTS.override.md` (it would shadow the project's own `AGENTS.md`) and no write to
   `~/.codex/` (machine-wide).
-- **You try it:** `/harnex:setup`, choose `local` and `jev`, on a fresh folder with no
-  git repository: setup asks where the store lives and proposes nothing; the one plan it
-  prints shows `git init`, the exclude entries waiting on it with `.env` among them, the
-  store registration at your path, and the global setting's key and value. Say yes:
-  `git init` and the registration run, then the files are written, and
-  `git check-ignore -v .env` names `.git/info/exclude`. Run setup again: no store question,
-  the recorded store is reused. Then run `/harnex:apply` on a task routed to Codex: its
-  prompt opens with the instruction to read `.harnex/rules.md`. Full steps in
-  `docs/smoke.md`'s own section for `C7`, updated for the new order.
+- **You try it:** `/harnex:setup` on a folder with no git repository, or with anything
+  uncommitted outside the harness's own paths: it stops before its first question, saying
+  what to do and listing the paths. Commit the project as it is and run it again, choosing `local` and `jev`: setup
+  asks where the store lives and proposes nothing; the one plan it prints shows the
+  exclude entries with `.env` among them, the store registration at your path, and the
+  global setting's key and value. Say yes: the registration runs, then the files are
+  written, and `git check-ignore -v .env` names `.git/info/exclude`. Run setup again: no
+  store question, the recorded store is reused, and the tree still counts as clean since
+  everything setup wrote is ignored. Then run `/harnex:apply` on a task routed to Codex:
+  its prompt opens with the instruction to read `.harnex/rules.md`. Full steps in
+  `docs/smoke.md`'s own section for `C7`; every walkthrough there that runs setup now
+  starts from a committed repository.
 - **Tests:** `store_path`'s own refusals (non-text, answered under `shared`, missing on
   a first `local` setup) and its plan line, a rerun with a recorded `store_id` needing
-  none, and the path never being recorded; `git init` planned instead of a conflict under
-  `local`, `shared` without `.git` unchanged, `write` refused while `git init` is
-  pending, and every entry plus `.env` excluded once it has run; `.env` excluded with
-  `.env` and `.gitignore` byte-for-byte unchanged, before `.env` exists, asserted with a
-  real `git check-ignore`; `mock` adding no entry, a `jev`→`mock` change leaving an
-  earlier one in place, and `shared` with `jev` differing from before by the `.env`
-  exclude step alone; one plan carrying both the `git init` and `.env` lines; the global
-  setting's line naming key and value, written only when approved; the new Codex notice;
-  and, as skill content, the store question, the order of `git init` and the
-  registration after the plan's yes, the single plan, the final report's side effects,
-  and `apply`'s Codex prompt under each visibility.
-- **Exit:** met for the automated checks — `uv run --with pytest pytest` passes on the
-  delivered tree. **Not yet confirmed live:** a real `local` `/harnex:setup` run on a
-  fresh, git-less project showing the one plan end to end and running `git init` and the
-  registration after the yes; and a real Codex `apply` task under `local` visibility
-  actually reading `.harnex/rules.md` from the prompt's instruction — the risk
+  none, the path never being recorded, and a `store_path` refused once a `store_id` is
+  recorded; the clean-tree precondition refusing no repository, a failing `git status`,
+  a modified file and an untracked file, allowing an ignored file and a clean repository,
+  letting a `local` rerun through after a write, a `shared` rerun before the person
+  commits (nothing to do) and an interrupted setup (it completes), printing the full
+  plan behind a dirty non-harness path's conflict, with `update` exempt; a worktree and
+  a subdirectory excluding `.env` in their repository's own list, the subdirectory's
+  status scoped to its subtree;
+  `.env` excluded with `.env` and `.gitignore` byte-for-byte unchanged, before `.env`
+  exists, asserted with a real `git check-ignore`; `mock` adding no entry, a `jev`→`mock`
+  change leaving an earlier one in place, and `shared` with `jev` differing from before
+  by the `.env` exclude step alone; the global setting's line naming key and value,
+  written only when approved; the new Codex notice; and, as skill content, the clean-tree
+  check before the first question and never running `git init`, commit or stash, the
+  store question, the registration after the plan's yes, the single plan, the final
+  report's side effects, and `apply`'s Codex prompt under each visibility.
+- **Exit:** met for everything but the manual try — the automated checks pass on the
+  delivered tree (`uv run --with pytest pytest`). **Owed, not yet confirmed live:** the
+  full manual walkthrough under **You try it** — a real `local` `/harnex:setup` run
+  showing the clean-tree refusal; then, on the committed project with `jev` chosen, the
+  one plan end to end, the registration after the yes, and `.env` excluded through
+  `.git/info/exclude` (`git check-ignore -v .env`); and a real Codex-routed `apply` task
+  under `local` visibility actually reading `.harnex/rules.md` from the prompt's
+  instruction — the risk
   `design.md` names, a prefix the model can ignore, is mitigated by the loop's own
   checks after every builder, not removed.
 - **What it taught us:** **a disclosure that a test asserts can make a gap look
@@ -870,7 +921,19 @@ enforces itself. Each is its own OpenSpec change, in this order.
   repository itself, so the very next `git add .` would have committed the key — showed
   that saying so was not the same as closing it. The same run showed a tool's required
   flag turning into a silent default: `openspec store setup` refuses to run without
-  `--path`, so setup took the tool's suggestion rather than the person's answer.
+  `--path`, so setup took the tool's suggestion rather than the person's answer. And the
+  first fix for a missing repository repeated the mistake it was meant to close: a
+  planned `git init` step was built, tested and then withdrawn at the person's request,
+  because `git init` on an existing folder leaves every file in it untracked — the
+  opposite of a clean tree — and leaves the project's first commit to whoever runs
+  `git add .` next, unreviewed. Creating the repository was the person's decision too;
+  setup now requires one, clean, and says so. The first strict version of that
+  precondition then broke two requirements already in the spec: `verify` caught it
+  refusing a rerun on the very files setup had just written, contradicting "Running
+  setup again changes nothing" and "An interrupted setup completes on the next run", and
+  looking for a `.git` directory rather than asking git, which turned worktrees and
+  subdirectories away. A new precondition has to be read against every requirement it
+  sits next to, not only the gap it closes; the harness's own paths now do not count.
 
 Later, not scheduled: tuning thresholds from the journal's resolutions; a Codex-side guard
 hook; a `security-reviewer` for projects with an attack surface; promoting a `local` setup

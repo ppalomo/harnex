@@ -11,7 +11,43 @@ script would write, and you never approve anything on the person's behalf.
 
 The script is at `${CLAUDE_PLUGIN_ROOT}/scripts/setup.py`. Run it with `uv run`.
 
-## 1. Learn what is on offer, and what the project already answered
+## 1. Check the working tree is clean, then learn what is on offer
+
+Before asking anything, under either visibility, run in the project root:
+
+```
+git rev-parse --show-toplevel
+git rev-parse --show-prefix
+git status --porcelain=v1 -z --untracked-files=all -- .
+```
+
+Setup runs only inside a git repository with nothing to commit apart from the harness's
+own paths; the plan refuses anything else as a conflict, so check it first rather than
+asking questions for a plan that will refuse them. The repository is whatever
+`git rev-parse` finds, so a worktree and a project in a subdirectory of a repository both
+work; the trailing `-- .` keeps the status to the project's own subtree. The status
+lists its paths relative to the repository's root, not the project's: strip the prefix
+`git rev-parse --show-prefix` printed (empty at the top of a repository, `sub/dir/` in a
+subdirectory) from the front of each path before comparing it with the harness's own
+paths below, or a project in a subdirectory would see its own `AGENTS.md` as
+`sub/dir/AGENTS.md` and stop on it. `-z` is what makes that stripping safe: without it,
+git quotes a path holding a space or a non-ASCII character (`"sub/dir/my file"`), and the
+prefix no longer sits at the front of it. With `-z` each entry is the two status letters,
+a space and the path exactly as it is, ended by a NUL byte rather than a newline; a
+rename or copy (`R` or `C`) is followed by one more NUL-ended field, the original path,
+which is checked the same way. If `git rev-parse` fails, there is no repository: stop and tell the person to run `git init`
+and commit first. The harness's own paths do not count — `AGENTS.md`, `CLAUDE.md`,
+`.harnex.yml`, anything under `.harnex/`, `openspec/config.yaml`,
+`.claude/settings.json`, `.mcp.json`, `CLAUDE.local.md` and
+`.claude/settings.local.json` — so a rerun before the person commits what setup wrote, or
+after an interrupted run, goes ahead. If the command lists any other path, stop, show
+those paths exactly as it listed them, and say to commit or stash them first. An
+untracked `.env` is the common case: the person can exclude it themselves (for instance
+by adding it to `.git/info/exclude`) and run setup again; you do not do it for them here.
+Setup never runs `git init`, commits or stashes to get past this. The script's own
+conflict is what enforces it; this check only spares the person the questions.
+
+Once the tree is clean:
 
 ```
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/setup.py" choices
@@ -60,24 +96,39 @@ question in the conversation, never more than 4 options.
    (`/harnex:apply`) hands Codex the rules — its prompt starts with an instruction to
    read `.harnex/rules.md` and follow it — but Codex used outside apply will not have
    them, since `AGENTS.md` is never written under `local` visibility.
-9. **Store location** (`local` visibility only, and only when no `store_id` is recorded)
-   — where the OpenSpec store for this project's changes should live, as a folder path.
-   Ask it as a plain question; propose no path of your own, and never adopt the one the
-   `openspec` tool suggests (`~/openspec/<id>`) unless the person gives it as their
-   answer.
+9. **Store location** (`local` visibility only) — asked only when no store id is
+   recorded and no store is already registered under the id setup would use; step 3
+   says how to choose that id and look it up, so work that out before asking. Where the
+   OpenSpec store for this project's changes should live, as a folder path outside the
+   project's own directory: the script refuses a path inside it, since registering there
+   would create an `openspec/` directory in the project. Ask it as a plain question;
+   propose no path of your own, and never adopt the one the `openspec` tool suggests
+   (`~/openspec/<id>`) unless the person gives it as their answer.
 
 ## 3. Local visibility: resolve the store before planning, register nothing yet
 
-Skip this section under `shared` visibility. Nothing here runs a command: the
-registration is a line of the plan, run only after the person's yes (step 6).
+Skip this section under `shared` visibility. Nothing here changes anything — the one
+command it runs only lists what is registered — and the registration is a line of the
+plan, run only after the person's yes (step 6).
 
 If the project's already-recorded `.harnex/config.yml` holds a `store_id`, reuse it —
 put it in `store_id`, leave `store_path` empty, and do not ask where the store lives or
 register a second one. Otherwise, choose `<id>` the way Claude Code's own auto-memory
-keys a project's memory directory: from the git repository (or, while there is none yet,
-the project root), so every worktree and subdirectory of the same repository shares one
-store. Put it in `store_id`, and the person's answer to the store location question in
-`store_path`.
+keys a project's memory directory: from the git repository, so every worktree and subdirectory of the same repository shares one
+store. Then, before asking where it lives, see whether a store is already registered
+under that id:
+
+```
+openspec store list --json
+```
+
+It prints `{"stores": [{"id": …, "root": …}, …]}`. If an entry's `id` is the id you
+chose — a run interrupted after registering the store and before writing leaves exactly
+that behind — reuse it: put the id in `store_id`, leave `store_path` empty, set
+`store_registered` to `true`, and do not ask where the store lives or register it again.
+Only when no entry has that id, put it in `store_id`, and the person's answer to the
+store location question in `store_path`. A `store_id` already recorded needs neither
+`store_path` nor `store_registered`.
 
 ## 4. Show the plan before anything is written
 
@@ -95,15 +146,19 @@ shaped like this, then plan:
   },
   "visibility": "shared",
   "tools": [],
-  "store_id": "", "store_path": ""
+  "store_id": "", "store_path": "", "store_registered": false
 }
 ```
 
 Under `local` visibility, `visibility` is `"local"`, `tools` holds the chosen bindings,
-and `store_id` and `store_path` come from step 3. Under `shared` visibility, leave
-`visibility` as `"shared"` and `tools`/`store_id`/`store_path` empty — the script refuses
+and `store_id`, `store_path` and `store_registered` come from step 3. `store_registered`
+is `true` only when the store list held the id and no `store_id` is recorded; the script
+refuses it alongside a `store_path`, since a store already registered is not registered
+again. Under `shared` visibility, leave `visibility` as `"shared"`,
+`tools`/`store_id`/`store_path` empty and `store_registered` `false` — the script refuses
 any of them without `local` visibility, the same way it refuses a canary word without the
-`canary` set, and refuses a first `local` setup with no `store_path`.
+`canary` set, and refuses a first `local` setup with no `store_path` and no
+`store_registered`.
 
 ```
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/setup.py" plan --answers <file> --project <project root>
@@ -111,10 +166,9 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/setup.py" plan --answers <file> --project 
 
 Show the person the plan as the script printed it, every line of it. Do not summarise the
 conflicts away and do not reorder the lines. It is the one plan for the whole run: the
-`git init` step (`local` visibility with no `.git`), the exclude entries waiting on it —
-`.env` among them when `jev` is chosen — the "register store" step and the global
-setting's line all appear in it, and the person's single yes to it covers them. There is
-no second plan.
+exclude entries — `.env` among them when `jev` is chosen — the "register store" step and
+the global setting's line all appear in it, and the person's single yes to it covers
+them. There is no second plan.
 
 ## 5. Approvals are the person's, one by one
 
@@ -143,13 +197,11 @@ obviously fine are not a yes. If you are unsure whether the person agreed, ask a
 ## 6. Run the plan's own commands, then write
 
 A conflict left standing means nothing is written, by design: say which conflicts remain
-and what resolves each. Otherwise, once the person has approved the plan, and only then,
-run what the plan names but the script never runs, in this order:
-
-1. If the plan has the `git init` step, run `git init` in the project root.
-2. If the plan has the "register store" step, run
-   `openspec store setup <id> --path <path>` with exactly the id and path that step
-   shows. If it fails, stop and say why: nothing has been written yet.
+and what resolves each — a tree that is not clean among them, which the person resolves,
+never you. Otherwise, once the person has approved the plan, and only then, run what the
+plan names but the script never runs: if the plan has the "register store" step, run
+`openspec store setup <id> --path <path>` with exactly the id and path that step shows.
+If it fails, stop and say why: nothing has been written yet.
 
 Then write, with the same answers file — do not plan again and do not ask again:
 
@@ -158,12 +210,11 @@ uv run "${CLAUDE_PLUGIN_ROOT}/scripts/setup.py" write --answers <file> --project
 ```
 
 The script surveys again before it writes, so an approval given against a plan that has
-since gone stale writes nothing and says why; it also writes nothing while the plan's
-`git init` has not run. Report the paths it wrote, and every side effect beyond them, by
-name:
+since gone stale writes nothing and says why. Report the paths it wrote, and every side
+effect beyond them, by name:
 
-- `git init`, if you ran it.
-- The store registration — its id and its path — if you ran it.
+- The store registration — its id and its path — if you ran it; if the plan showed
+  "reuse store `<id>`" instead, say the store was reused, not registered.
 - `.env` added to `.git/info/exclude`, if `jev` was chosen and the plan's exclude step
   carried it.
 - The global setting, if it was approved and written: the file
@@ -190,8 +241,10 @@ Under `local` visibility there is no `AGENTS.md` to point at — say instead tha
 
 - Write, edit or create any of the project's files itself. The script writes; you ask.
 - Set an approval the person did not give, or adopt a file to get past a conflict.
-- Run `claude mcp add` without the person's yes, or `openspec store setup` or
-  `git init` before the person's yes to the plan that shows them.
+- Run `claude mcp add` without the person's yes, or `openspec store setup` before the
+  person's yes to the plan that shows it.
+- Ask the questions before the working tree is known to be clean.
+- Run `git init`, commit or stash — not to get past the clean-tree check, not ever.
 - Choose where the store lives: the path is the person's answer, never a default they
   did not see.
 - Show a second plan to approve what the first one already showed.

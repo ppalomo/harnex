@@ -16,6 +16,7 @@ import apply_loop
 import setup
 import update
 import verify_checks
+from conftest import commit_all, tree
 
 
 def _git(project: Path, *args: str) -> None:
@@ -31,6 +32,7 @@ def repo(tmp_path: Path) -> Path:
     _git(project, "init", "-q")
     _git(project, "config", "user.email", "test@test.com")
     _git(project, "config", "user.name", "test")
+    _git(project, "config", "commit.gpgsign", "false")
     return project
 
 
@@ -132,10 +134,29 @@ def test_harnex_yml_s_own_shape_is_unchanged(plugin_root: Path, answers: dict) -
     assert "visibility" not in read.as_choices()
 
 
-def _local_plan(project: Path, plugin_root: Path, answers: dict, home: Path | None = None) -> "setup.Plan":
+def _local_plan(
+    project: Path,
+    plugin_root: Path,
+    answers: dict,
+    home: Path | None = None,
+    *,
+    commit: bool = True,
+) -> "setup.Plan":
+    """Plan the fixture, committed first unless asked not to: setup plans only on a clean
+    git working tree (design.md D4), and most checks here are about what it plans there."""
+    if commit:
+        commit_all(project)
     return setup.build_plan(
         project, plugin_root, setup.read_answers(json.dumps(answers), plugin_root), home=home
     )
+
+
+def _rerun(answers: dict) -> dict:
+    """The answers of a rerun: a recorded store is reused, so no `store_path` is asked
+    or passed — one passed anyway is refused (design.md D4's last paragraph)."""
+    document = dict(answers)
+    document.pop("store_path", None)
+    return document
 
 
 def _step(plan: "setup.Plan", path: str) -> "setup.Step":
@@ -166,7 +187,7 @@ def test_an_existing_agents_md_is_left_byte_identical(
     code, _ = setup_run("write", repo, local_answers)
     assert code == 0
     assert (repo / setup.AGENTS).read_bytes() == original
-    plan = _local_plan(repo, plugin_root, local_answers)
+    plan = _local_plan(repo, plugin_root, _rerun(local_answers))
     assert _step(plan, setup.AGENTS).action == setup.KEEP
 
 
@@ -178,7 +199,7 @@ def test_an_existing_claude_md_is_left_byte_identical(
     code, _ = setup_run("write", repo, local_answers)
     assert code == 0
     assert (repo / setup.CLAUDE).read_bytes() == original
-    plan = _local_plan(repo, plugin_root, local_answers)
+    plan = _local_plan(repo, plugin_root, _rerun(local_answers))
     assert _step(plan, setup.CLAUDE).action == setup.KEEP
 
 
@@ -229,7 +250,7 @@ def test_git_exclude_is_idempotent_on_a_second_run(
     code, _ = setup_run("write", repo, local_answers)
     assert code == 0
     before = (repo / ".git" / "info" / "exclude").read_bytes()
-    code, _ = setup_run("write", repo, local_answers)
+    code, _ = setup_run("write", repo, _rerun(local_answers))
     assert code == 0
     assert (repo / ".git" / "info" / "exclude").read_bytes() == before
 
@@ -237,9 +258,9 @@ def test_git_exclude_is_idempotent_on_a_second_run(
 def test_local_visibility_without_a_git_repository_refuses_to_write(
     project: Path, plugin_root: Path, local_answers: dict, setup_run
 ) -> None:
-    """`write` with `git init` still pending refuses outright rather than writing
-    everything except the exclude entries (design.md D4)."""
-    code, output = setup_run("write", project, local_answers)
+    """With no repository, `write` refuses on the clean-tree precondition (design.md D4)
+    and writes nothing at all."""
+    code, output = setup_run("write", project, local_answers, commit=False)
     assert code != 0
     assert "git init" in output
     assert not (project / setup.CLAUDE_LOCAL).exists()
@@ -247,72 +268,56 @@ def test_local_visibility_without_a_git_repository_refuses_to_write(
     assert not (project / ".git").exists(), "the script never runs git itself"
 
 
-# --- C9 1.3: `git init` is a plan line under local visibility ----------------------
+# --- C9 4.1: a clean git working tree is a precondition (design.md D4) -------------
 
 
-def test_local_visibility_without_a_git_repository_plans_git_init_not_a_conflict(
-    project: Path, plugin_root: Path, local_answers: dict, setup_run
+@pytest.mark.parametrize("visibility", ["local", "shared"])
+@pytest.mark.parametrize("decision_model", ["mock", "jev"])
+def test_no_git_repository_is_a_conflict_under_either_visibility(
+    project: Path,
+    plugin_root: Path,
+    answers: dict,
+    local_answers: dict,
+    setup_run,
+    visibility: str,
+    decision_model: str,
 ) -> None:
-    plan = _local_plan(project, plugin_root, local_answers)
-    assert not plan.conflicts
-    init = _step(plan, setup.GIT_DIR)
-    assert init.action == setup.INIT and init.data is None
-    exclude = _step(plan, setup.GIT_EXCLUDE)
-    assert exclude.action == setup.PENDING and exclude.data is None
-    for path in setup.GIT_EXCLUDE_PATHS:
-        assert path in exclude.detail
-    assert ".env" not in exclude.detail
-    assert plan.steps.index(init) < plan.steps.index(exclude)
+    """No `git init` step and no pending exclude entries any more: the plan opens with the
+    conflict saying to create the repository and commit, and every other path is still
+    planned alongside it. No `.env` entry is planned without a repository."""
+    document = dict(local_answers if visibility == "local" else answers)
+    document["decision_model"] = decision_model
+    plan = _local_plan(project, plugin_root, document, commit=False)
+    assert (plan.steps[0].path, plan.steps[0].action) == (setup.GIT_DIR, setup.CONFLICT)
+    assert setup.RULES in [step.path for step in plan.steps]
+    assert "`git init`" in plan.conflicts[0] and "commit" in plan.conflicts[0]
+    exclude = [step for step in plan.steps if step.path == setup.GIT_EXCLUDE]
+    if visibility == "local":
+        assert [step.action for step in exclude] == [setup.CONFLICT]
+        # Shared visibility needs a repository too (design.md D4), so it is no way out.
+        assert not any("`shared`" in conflict for conflict in plan.conflicts)
+    else:
+        assert exclude == []
+    assert not any(".env" in step.detail for step in plan.steps)
 
-    code, output = setup_run("plan", project, local_answers)
-    assert code == 0
+    code, output = setup_run("plan", project, document, commit=False)
+    assert code == 1
+    assert output.count("Plan for ") == 1
     assert "git init" in output
     assert not (project / ".git").exists(), "planning creates no repository"
-
-
-def test_jev_with_git_init_pending_plans_the_env_exclusion_in_the_same_plan(
-    project: Path, plugin_root: Path, local_answers: dict
-) -> None:
-    local_answers["decision_model"] = "jev"
-    plan = _local_plan(project, plugin_root, local_answers)
-    assert not plan.conflicts
-    assert _step(plan, setup.GIT_DIR).action == setup.INIT
-    exclude = _step(plan, setup.GIT_EXCLUDE)
-    assert exclude.action == setup.PENDING and ".env" in exclude.detail
-    notices = "\n".join(plan.notices)
-    assert "once `git init` has created the repository" in notices
-    assert "not a git repository" not in notices
-
-
-def test_jev_with_git_init_pending_shows_one_plan_with_both_lines(
-    project: Path, plugin_root: Path, local_answers: dict, setup_run
-) -> None:
-    """What the person reads before the single yes: the rendered plan names `git init`
-    and the `.env` exclusion together, and nothing has happened yet."""
-    local_answers["decision_model"] = "jev"
-    code, output = setup_run("plan", project, local_answers)
-    assert code == 0
-    assert output.count("Plan for ") == 1, "one plan, not a second one after `git init`"
-    lines = output.splitlines()
-    init = [line for line in lines if "`git init` creates one" in line]
-    exclude = [line for line in lines if setup.GIT_EXCLUDE in line and ".env" in line]
-    assert len(init) == 1
-    assert any(line.strip().startswith(setup.PENDING) for line in exclude)
-    assert lines.index(init[0]) < lines.index(exclude[0])
-    assert not (project / ".git").exists()
     assert not (project / ".env").exists()
 
 
-def test_write_after_git_init_excludes_every_entry_and_env(
+def test_write_after_the_person_commits_excludes_every_entry_and_env(
     project: Path, plugin_root: Path, local_answers: dict, setup_run
 ) -> None:
-    """The skill runs `git init` after the yes; `write`'s own re-survey then finds the
-    repository and writes the entries that were pending on it."""
+    """The person creates and commits the repository themselves; setup then plans and
+    writes the exclude entries as an ordinary write."""
     local_answers["decision_model"] = "jev"
-    code, _ = setup_run("plan", project, local_answers)
-    assert code == 0
-    _git(project, "init", "-q")  # what the skill does after the person's yes
-    code, _ = setup_run("write", project, local_answers)
+    code, _ = setup_run("plan", project, local_answers, commit=False)
+    assert code == 1
+    commit_all(project)  # what the person does, never setup
+    code, _ = setup_run("write", project, local_answers, commit=False)
     assert code == 0
     lines = (project / setup.GIT_EXCLUDE).read_text(encoding="utf-8").splitlines()
     for path in (*setup.GIT_EXCLUDE_PATHS, ".env"):
@@ -320,25 +325,38 @@ def test_write_after_git_init_excludes_every_entry_and_env(
     assert _check_ignore(project, ".env")
     assert _check_ignore(project, setup.CLAUDE_LOCAL)
     assert not (project / ".env").exists(), "setup never creates .env"
-    rerun = _local_plan(project, plugin_root, local_answers)
-    assert not any(step.action == setup.INIT for step in rerun.steps)
 
 
-@pytest.mark.parametrize("decision_model", ["mock", "jev"])
-def test_shared_visibility_without_a_git_repository_is_unchanged(
-    project: Path, plugin_root: Path, answers: dict, setup_run, decision_model: str
+def test_a_local_rerun_after_a_write_is_not_refused(
+    repo: Path, plugin_root: Path, local_answers: dict, setup_run
 ) -> None:
-    """`.git` is never setup's to create under `shared`: no `git init` step, no exclude
-    step, and the `.env` notice still says the repository is missing."""
-    answers["decision_model"] = decision_model
-    plan = _local_plan(project, plugin_root, answers)
-    assert not any(step.path in (setup.GIT_DIR, setup.GIT_EXCLUDE) for step in plan.steps)
-    assert not any(step.action in (setup.INIT, setup.PENDING) for step in plan.steps)
-    if decision_model == "jev":
-        assert "not a git repository" in "\n".join(plan.notices)
-    code, _ = setup_run("write", project, answers)
+    """Everything a `local` setup writes is ignored or excluded, so the tree it leaves is
+    still clean and a rerun plans as usual — no commit in between."""
+    code, _ = setup_run("write", repo, local_answers)
     assert code == 0
-    assert not (project / ".git").exists()
+    assert _status(repo) == ""
+    plan = _local_plan(repo, plugin_root, _rerun(local_answers), commit=False)
+    assert not plan.conflicts
+    assert plan.nothing_to_do
+    code, output = setup_run("write", repo, _rerun(local_answers), commit=False)
+    assert code == 0 and "Nothing to do" in output
+
+
+def test_a_shared_rerun_before_the_person_commits_plans_nothing_to_do(
+    repo: Path, plugin_root: Path, answers: dict, setup_run
+) -> None:
+    """Under `shared` what setup wrote is the person's to commit; until they do, the only
+    uncommitted paths are the harness's own, which do not count, so a rerun plans
+    nothing to do."""
+    code, _ = setup_run("write", repo, answers)
+    assert code == 0
+    assert setup.AGENTS in _status(repo)
+    plan = _local_plan(repo, plugin_root, answers, commit=False)
+    assert not plan.conflicts
+    assert all(step.path != setup.GIT_DIR for step in plan.steps)
+    assert plan.nothing_to_do
+    code, output = setup_run("write", repo, answers, commit=False)
+    assert code == 0 and "Nothing to do" in output
 
 
 # --- C9 1.2: `.env` joins the exclude list when `jev` is chosen ---------------------
@@ -356,23 +374,44 @@ def _check_ignore(project: Path, path: str) -> bool:
 
 @pytest.mark.parametrize("visibility", ["local", "shared"])
 def test_jev_excludes_env_without_touching_env_or_gitignore(
-    repo: Path, plugin_root: Path, answers: dict, local_answers: dict, setup_run, visibility: str
+    repo: Path,
+    plugin_root: Path,
+    answers: dict,
+    local_answers: dict,
+    setup_run,
+    tmp_path: Path,
+    visibility: str,
 ) -> None:
+    """An existing `.env` has to be ignored already for the tree to be clean (design.md
+    D4), so the fixture ignores it through the person's own excludes file — the lowest
+    precedence source git reads — and `git check-ignore -v` then shows that after the
+    write the match comes from `.git/info/exclude` instead."""
     document = dict(local_answers if visibility == "local" else answers)
     document["decision_model"] = "jev"
     env = b"OPENROUTER_API_KEY=not-a-real-key\n"
     ignore = b"build/\n"
+    personal = tmp_path / "personal-excludes"
+    personal.write_text(".env\n", encoding="utf-8")
+    _git(repo, "config", "core.excludesFile", str(personal))
     (repo / ".env").write_bytes(env)
     (repo / ".gitignore").write_bytes(ignore)
+    commit_all(repo)
+    assert _status(repo) == ""
 
-    plan = _local_plan(repo, plugin_root, document)
+    plan = _local_plan(repo, plugin_root, document, commit=False)
     step = _step(plan, setup.GIT_EXCLUDE)
     assert step.data is not None and ".env" in step.detail
     assert any(".env" in n and setup.GIT_EXCLUDE in n for n in plan.notices)
 
-    code, _ = setup_run("write", repo, document)
+    code, _ = setup_run("write", repo, document, commit=False)
     assert code == 0
-    assert _check_ignore(repo, ".env")
+    matched = subprocess.run(
+        ["git", "-C", str(repo), "check-ignore", "-v", ".env"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    assert matched.startswith(".git/info/exclude:"), matched
     assert (repo / ".env").read_bytes() == env
     assert (repo / ".gitignore").read_bytes() == ignore
 
@@ -428,6 +467,7 @@ def test_a_jev_to_mock_change_leaves_the_earlier_env_entry_in_place(
     before = (repo / setup.GIT_EXCLUDE).read_bytes()
     assert ".env" in before.decode("utf-8").splitlines()
 
+    document = _rerun(document)
     document["decision_model"] = "mock"
     plan = _local_plan(repo, plugin_root, document)
     assert not any(".env" in notice for notice in plan.notices)
@@ -444,36 +484,239 @@ def test_shared_jev_differs_from_before_only_by_the_env_exclude_step(
     repo: Path, plugin_root: Path, answers: dict, tmp_path: Path
 ) -> None:
     """`shared` visibility's one deliberate addition: in a git repository, `jev` adds the
-    `.git/info/exclude` step for `.env` and nothing else. The same answers in a project
-    with no repository are what `shared` with `jev` planned before this change."""
+    `.git/info/exclude` step for `.env` and its notice, and nothing else. Every project
+    setup plans for is now a git repository (design.md D4), so "before" is the same
+    project with `mock`: the only other difference is `.harnex.yml` recording the choice."""
     answers["decision_model"] = "jev"
-    elsewhere = tmp_path / "elsewhere"
-    elsewhere.mkdir()
-    in_repo = _local_plan(repo, plugin_root, answers, home=tmp_path / "home")
-    without_repo = _local_plan(elsewhere, plugin_root, answers, home=tmp_path / "home")
+    jev = _local_plan(repo, plugin_root, answers, home=tmp_path / "home")
+    answers["decision_model"] = "mock"
+    mock = _local_plan(repo, plugin_root, answers, home=tmp_path / "home")
 
     def shape(plan: "setup.Plan") -> list[tuple]:
         return [
-            (step.path, step.owner, step.action, step.detail, step.data)
+            (step.path, step.owner, step.action, step.detail)
+            + ((step.data,) if step.path != setup.CHOICES else ())
             for step in plan.steps
             if step.path != setup.GIT_EXCLUDE
         ]
 
-    assert shape(in_repo) == shape(without_repo)
-    exclude = _step(in_repo, setup.GIT_EXCLUDE)
+    assert shape(jev) == shape(mock)
+    assert not any(step.path == setup.GIT_EXCLUDE for step in mock.steps)
+    exclude = _step(jev, setup.GIT_EXCLUDE)
     assert exclude.data is not None
     original = (repo / setup.GIT_EXCLUDE).read_bytes()  # what `git init` itself wrote
     assert exclude.data.startswith(original)
     added = exclude.data[len(original):].decode("utf-8").splitlines()
     assert [line for line in added if line and not line.startswith("#")] == [".env"]
-    assert not in_repo.conflicts and not without_repo.conflicts
-    assert len(in_repo.notices) == len(without_repo.notices) == 1
+    assert not jev.conflicts and not mock.conflicts
+    assert len(jev.notices) == 1 and mock.notices == []
 
-    answers["decision_model"] = "mock"
-    mock = _local_plan(repo, plugin_root, answers, home=tmp_path / "home")
-    assert [(s.path, s.owner, s.action) for s in mock.steps] == [
-        (s.path, s.owner, s.action) for s in in_repo.steps if s.path != setup.GIT_EXCLUDE
+
+def test_a_fresh_clone_of_a_shared_jev_project_restores_only_state_and_env(
+    repo: Path, plugin_root: Path, answers: dict, setup_run, tmp_path: Path
+) -> None:
+    """A real `git clone` carries every committed path, but not `.harnex/state/` (it
+    ignores itself) and not the `.env` entry (`.git/info/exclude` is never cloned). The
+    clone is recognised from the committed record, nothing is asked, and those two are
+    the only steps that are not unchanged."""
+    answers["decision_model"] = "jev"
+    code, _ = setup_run("write", repo, answers, home=tmp_path / "home")
+    assert code == 0
+    commit_all(repo)
+
+    clone = tmp_path / "clone"
+    subprocess.run(
+        ["git", "clone", "-q", str(repo), str(clone)], check=True, capture_output=True
+    )
+    assert not (clone / ".harnex" / "state").exists()
+    assert ".env" not in (clone / setup.GIT_EXCLUDE).read_text(encoding="utf-8")
+
+    plan = _local_plan(clone, plugin_root, answers, home=tmp_path / "home", commit=False)
+    assert not plan.conflicts
+    # `keep` is how a path already pointing at the rules, or the project's own record,
+    # is reported unchanged: left alone, nothing written.
+    moved = [
+        (step.path, step.action)
+        for step in plan.steps
+        if step.action not in (setup.UNCHANGED, setup.KEEP)
     ]
+    assert sorted(moved) == sorted(
+        [(setup.STATE_IGNORE, setup.CREATE), (setup.GIT_EXCLUDE, setup.UPDATE)]
+    )
+    assert sorted(step.path for step in plan.writes) == sorted(
+        [setup.STATE_IGNORE, setup.GIT_EXCLUDE]
+    )
+    exclude = _step(plan, setup.GIT_EXCLUDE)
+    original = (clone / setup.GIT_EXCLUDE).read_bytes()
+    assert exclude.data is not None and exclude.data.startswith(original)
+    added = exclude.data[len(original):].decode("utf-8").splitlines()
+    assert [line for line in added if line and not line.startswith("#")] == [".env"]
+
+
+def test_an_update_in_a_fresh_clone_of_a_jev_project_restores_the_env_entry(
+    repo: Path, plugin_root: Path, answers: dict, setup_run, tmp_path: Path
+) -> None:
+    """`update` reads only what is committed and is handed no answers at all, so it asks
+    nothing; in a fresh clone of a shared `jev` project it restores the runtime state
+    location and the `.env` entry in the clone's own exclude list, and nothing else."""
+    answers["decision_model"] = "jev"
+    code, _ = setup_run("write", repo, answers, home=tmp_path / "home")
+    assert code == 0
+    commit_all(repo)
+
+    clone = tmp_path / "clone"
+    subprocess.run(
+        ["git", "clone", "-q", str(repo), str(clone)], check=True, capture_output=True
+    )
+    assert not _check_ignore(clone, ".env")
+    committed = {path: data for path, data in tree(clone).items()}
+
+    report, ok = update.run_update(clone, plugin_root, home=tmp_path / "home")
+    assert ok, report
+    assert "Conflicts" not in report
+    assert (clone / setup.STATE_IGNORE).is_file()
+    assert ".env" in (clone / setup.GIT_EXCLUDE).read_text(encoding="utf-8").splitlines()
+    assert _check_ignore(clone, ".env")
+    assert not (clone / ".env").exists(), "update never creates .env"
+    after = tree(clone)
+    assert sorted(set(after) - set(committed)) == [setup.STATE_IGNORE]
+    assert all(after[path] == data for path, data in committed.items())
+
+
+def test_the_shared_env_exclude_step_is_owned_by_this_clone(
+    repo: Path, plugin_root: Path, answers: dict, local_answers: dict
+) -> None:
+    """Under `shared` the `.env` entry protects this clone alone, and its step says so;
+    under `local` the exclude step stays `local`, like every other local path."""
+    answers["decision_model"] = "jev"
+    shared = _local_plan(repo, plugin_root, answers)
+    assert _step(shared, setup.GIT_EXCLUDE).owner == "this clone"
+    rendered = setup.render_plan(shared)
+    line = next(line for line in rendered.splitlines() if setup.GIT_EXCLUDE in line)
+    assert "this clone" in line
+
+    local_answers["decision_model"] = "jev"
+    local = _local_plan(repo, plugin_root, local_answers)
+    assert _step(local, setup.GIT_EXCLUDE).owner == "local"
+
+
+# --- C9 5.1: the repository is found through git (design.md D4) --------------------
+
+
+@pytest.mark.parametrize("visibility", ["local", "shared"])
+def test_a_worktree_excludes_env_in_its_repository_s_own_list(
+    repo: Path,
+    plugin_root: Path,
+    answers: dict,
+    local_answers: dict,
+    setup_run,
+    tmp_path: Path,
+    visibility: str,
+) -> None:
+    """A worktree's `.git` is a file; its exclude list is the common directory's, which
+    lies outside the worktree, so the step names it by its absolute path."""
+    commit_all(repo)
+    worktree = tmp_path / "worktree"
+    _git(repo, "worktree", "add", "-q", str(worktree))
+    assert (worktree / ".git").is_file()
+    document = dict(local_answers if visibility == "local" else answers)
+    document["decision_model"] = "jev"
+
+    plan = _local_plan(worktree, plugin_root, document, commit=False)
+    assert not plan.conflicts
+    exclude = [step for step in plan.steps if step.path.endswith("info/exclude")]
+    assert len(exclude) == 1 and Path(exclude[0].path).is_absolute()
+
+    code, _ = setup_run("write", worktree, document, commit=False)
+    assert code == 0
+    common = Path(git_path(worktree, "info/exclude"))
+    assert ".env" in common.read_text(encoding="utf-8").splitlines()
+    assert _check_ignore(worktree, ".env")
+    if visibility == "local":
+        assert _status(worktree) == ""
+
+
+@pytest.mark.parametrize("visibility", ["local", "shared"])
+def test_a_subdirectory_excludes_env_in_the_parent_repository_s_list(
+    repo: Path,
+    plugin_root: Path,
+    answers: dict,
+    local_answers: dict,
+    setup_run,
+    visibility: str,
+) -> None:
+    """A project in a subdirectory uses the parent's repository: the tree is checked
+    there, scoped to the project, and the entries are anchored to the project's own path
+    so they exclude its files and nothing beside them."""
+    project = repo / "packages" / "app"
+    project.mkdir(parents=True)
+    (project / "README.md").write_text("mine\n", encoding="utf-8")
+    commit_all(repo)
+    document = dict(local_answers if visibility == "local" else answers)
+    document["decision_model"] = "jev"
+
+    code, _ = setup_run("write", project, document, commit=False)
+    assert code == 0
+    lines = (repo / setup.GIT_EXCLUDE).read_text(encoding="utf-8").splitlines()
+    assert "packages/app/.env" in lines
+    assert _check_ignore(project, ".env")
+    assert not _check_ignore(repo, ".env"), "only the project's own .env is excluded"
+    assert not (project / ".git").exists()
+    if visibility == "local":
+        assert _status(repo) == ""
+
+
+def test_a_subdirectory_checks_only_its_own_subtree(
+    repo: Path, plugin_root: Path, answers: dict
+) -> None:
+    project = repo / "app"
+    project.mkdir()
+    (project / "README.md").write_text("mine\n", encoding="utf-8")
+    commit_all(repo)
+    (repo / "elsewhere.txt").write_text("not the project's\n", encoding="utf-8")
+    plan = _local_plan(project, plugin_root, answers, commit=False)
+    assert not plan.conflicts
+
+    (project / "README.md").write_text("changed\n", encoding="utf-8")
+    plan = _local_plan(project, plugin_root, answers, commit=False)
+    assert plan.steps[0].path == setup.GIT_DIR
+    assert plan.conflicts[0].splitlines()[1:] == ["     M README.md"]
+
+
+def test_a_non_english_locale_still_reports_no_repository(
+    project: Path, plugin_root: Path, answers: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Git's messages are read under `LC_ALL=C` (design.md D5), so a person whose locale
+    is not English still gets "not a git repository" rather than a git failure. Every git
+    call setup makes carries `LC_ALL=C`, whatever the person's own environment says."""
+    for name in ("LANG", "LC_ALL", "LC_MESSAGES", "LANGUAGE"):
+        monkeypatch.setenv(name, "de_DE.UTF-8")
+    environments = []
+    real_run = subprocess.run
+
+    def recording_run(*args, **kwargs):
+        environments.append(kwargs.get("env"))
+        return real_run(*args, **kwargs)
+
+    monkeypatch.setattr(setup.subprocess, "run", recording_run)
+    repository = setup.find_repository(project)
+    assert (repository.found, repository.failure) == (False, "")
+
+    plan = _local_plan(project, plugin_root, answers, commit=False)
+    assert plan.steps[0].path == setup.GIT_DIR
+    assert plan.steps[0].detail == "not a git repository"
+    assert environments and all(env and env["LC_ALL"] == "C" for env in environments)
+
+
+def git_path(project: Path, path: str) -> str:
+    """Where git itself says a path inside the repository's own directory lies."""
+    out = subprocess.run(
+        ["git", "-C", str(project), "rev-parse", "--path-format=absolute", "--git-path", path],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    return out
 
 
 # --- 3.1 / 3.2: .harnex/ widens its own self-ignore under local visibility ---------
@@ -635,13 +878,78 @@ def test_a_second_run_keeps_the_recorded_store_id_even_if_a_different_one_is_pas
 ) -> None:
     code, _ = setup_run("write", repo, local_answers)
     assert code == 0
-    other = dict(local_answers)
+    other = _rerun(local_answers)
     other["store_id"] = "a-different-store"
     code, _ = setup_run("write", repo, other)
     assert code == 0
     text = (repo / setup.LOCAL_CHOICES).read_text(encoding="utf-8")
     assert "store_id: scratch-store" in text
     assert "a-different-store" not in text
+
+
+# --- C9 7.1: a store registered by an interrupted run (design.md D5) --------------
+
+
+def _registered(answers: dict) -> dict:
+    """The answers when the skill finds the store already registered under the id: the
+    id, no path, and the flag."""
+    document = dict(answers)
+    document.pop("store_path", None)
+    document["store_registered"] = True
+    return document
+
+
+def test_an_interrupted_registration_completes_through_store_registered(
+    repo: Path, plugin_root: Path, local_answers: dict, setup_run
+) -> None:
+    """The store was registered and the run stopped before `write`: no id is recorded.
+    The plan reuses the store instead of refusing or registering it again, and `write`
+    records the id; a rerun after that is the ordinary one."""
+    document = _registered(local_answers)
+    assert not (repo / setup.LOCAL_CHOICES).exists()
+    plan = _local_plan(repo, plugin_root, document)
+    step = _step(plan, "openspec store")
+    assert step.action == setup.REUSE
+    assert step.data is None
+    assert step.detail.startswith("reuse store `scratch-store`")
+    assert not any(step.action == setup.REGISTER for step in plan.steps)
+    assert not plan.conflicts and not plan.nothing_to_do
+
+    code, output = setup_run("write", repo, document)
+    assert code == 0, output
+    assert "register store" not in output
+    text = (repo / setup.LOCAL_CHOICES).read_text(encoding="utf-8")
+    assert "store_id: scratch-store" in text
+    assert "store_registered" not in text, "an answer of this run only, never recorded"
+
+    plan = _local_plan(repo, plugin_root, _rerun(local_answers), commit=False)
+    assert _step(plan, "openspec store").action == setup.UNCHANGED
+    assert plan.nothing_to_do
+
+
+def test_store_registered_with_a_store_path_is_refused(
+    plugin_root: Path, local_answers: dict
+) -> None:
+    local_answers["store_registered"] = True
+    with pytest.raises(setup.SetupError) as refusal:
+        setup.read_answers(json.dumps(local_answers), plugin_root)
+    assert "store_path" in str(refusal.value)
+
+
+def test_store_registered_under_shared_visibility_is_refused(
+    plugin_root: Path, answers: dict
+) -> None:
+    answers["store_registered"] = True
+    with pytest.raises(setup.SetupError) as refusal:
+        setup.read_answers(json.dumps(answers), plugin_root)
+    assert "store_registered" in str(refusal.value)
+
+
+def test_store_registered_must_be_a_boolean(plugin_root: Path, local_answers: dict) -> None:
+    document = _registered(local_answers)
+    document["store_registered"] = "yes"
+    with pytest.raises(setup.SetupError):
+        setup.read_answers(json.dumps(document), plugin_root)
 
 
 # --- 7.1 / 7.2: the one-time global settings offer ----------------------------------
@@ -742,7 +1050,7 @@ def test_declining_the_global_offer_leaves_home_settings_untouched_and_repeats(
     assert code == 0
     assert (home / ".claude" / "settings.json").read_bytes() == original
 
-    plan_again = _local_plan(repo, plugin_root, local_answers, home=home)
+    plan_again = _local_plan(repo, plugin_root, _rerun(local_answers), home=home)
     assert any("instructionFiles" in notice for notice in plan_again.notices)
 
 
@@ -784,8 +1092,72 @@ def test_a_second_run_is_nothing_to_do(
 ) -> None:
     code, _ = setup_run("write", repo, local_answers)
     assert code == 0
-    plan = _local_plan(repo, plugin_root, local_answers)
+    plan = _local_plan(repo, plugin_root, _rerun(local_answers))
     assert plan.nothing_to_do
+
+
+def test_a_store_path_with_a_recorded_store_id_is_refused(
+    repo: Path, plugin_root: Path, local_answers: dict, setup_run
+) -> None:
+    """A rerun that still carries a store path would plan a second registration; it is
+    refused instead, and nothing is written."""
+    code, _ = setup_run("write", repo, local_answers)
+    assert code == 0
+    with pytest.raises(setup.SetupError) as refusal:
+        _local_plan(repo, plugin_root, local_answers)
+    assert "store_path" in str(refusal.value) and "scratch-store" in str(refusal.value)
+    before = (repo / setup.LOCAL_CHOICES).read_bytes()
+    code, output = setup_run("write", repo, local_answers)
+    assert code == 1 and "store_path" in output
+    assert (repo / setup.LOCAL_CHOICES).read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "inside",
+    ["{project}", "{project}/store", "{project}/sub/../store", ".", "store", "./sub/store"],
+)
+def test_a_store_path_inside_the_project_is_refused(
+    repo: Path, plugin_root: Path, local_answers: dict, setup_run, inside: str
+) -> None:
+    """Registering a store inside the project would create an `openspec/` directory in
+    it. A relative path is read against the project root, and the root itself counts."""
+    local_answers["store_path"] = inside.format(project=repo)
+    with pytest.raises(setup.SetupError) as refusal:
+        _local_plan(repo, plugin_root, local_answers)
+    assert "inside the project's own directory" in str(refusal.value)
+    before = tree(repo)
+    code, output = setup_run("write", repo, local_answers)
+    assert code == 1 and "inside the project's own directory" in output
+    assert tree(repo) == before
+
+
+def test_a_store_path_under_the_home_directory_is_expanded_before_the_check(
+    repo: Path, plugin_root: Path, local_answers: dict, monkeypatch
+) -> None:
+    monkeypatch.setenv("HOME", str(repo))
+    local_answers["store_path"] = "~/store"
+    with pytest.raises(setup.SetupError) as refusal:
+        _local_plan(repo, plugin_root, local_answers)
+    assert "inside the project's own directory" in str(refusal.value)
+
+
+def test_a_store_path_beside_the_project_is_planned(
+    repo: Path, plugin_root: Path, local_answers: dict
+) -> None:
+    """A sibling whose name merely starts with the project's is outside it."""
+    local_answers["store_path"] = str(repo.parent / (repo.name + "-store"))
+    step = _step(_local_plan(repo, plugin_root, local_answers), "openspec store")
+    assert step.action == setup.REGISTER
+
+
+def test_a_registration_alone_is_work_to_do(repo: Path) -> None:
+    """A plan whose only effect is registering the store is not "nothing to do"."""
+    plan = setup.Plan(
+        project=repo,
+        steps=[setup.Step("openspec store", "local", setup.REGISTER, "register store")],
+    )
+    assert not plan.writes and not plan.conflicts
+    assert not plan.nothing_to_do
 
 
 # --- 6.1 / 6.2: the guided question list, stated in the setup skill ----------------
@@ -816,14 +1188,46 @@ def test_the_skill_states_the_codex_limitation_when_codex_is_chosen(plugin_root:
 
 def test_the_skill_asks_where_the_store_lives_and_proposes_no_path(plugin_root: Path) -> None:
     text = " ".join(_setup_skill_text(plugin_root).split())
-    assert "**Store location** (`local` visibility only, and only when no `store_id` is recorded)" in text
+    assert "**Store location** (`local` visibility only) — asked only when no store id is recorded" in text
     assert "propose no path of your own" in text
     assert "never adopt the one the `openspec` tool suggests" in text
     assert '"store_id": "", "store_path": ""' in text
     assert "leave `store_path` empty, and do not ask where the store lives" in text
 
 
-def test_the_skill_runs_git_init_and_the_store_registration_only_after_the_plan_s_yes(
+def test_the_skill_reuses_a_store_already_registered_under_its_id(plugin_root: Path) -> None:
+    text = " ".join(_setup_skill_text(plugin_root).split())
+    question = text[text.find("**Store location**") : text.find("## 3. Local visibility")]
+    assert (
+        "asked only when no store id is recorded and no store is already registered under "
+        "the id setup would use" in question
+    )
+    assert "step 3 says how to choose that id and look it up" in question
+    section = text[text.find("## 3. Local visibility") : text.find("## 4. Show the plan")]
+    listing = section.find("openspec store list --json")
+    reuse = section.find("reuse it: put the id in `store_id`, leave `store_path` empty")
+    asked = section.find("the person's answer to the store location question")
+    assert -1 < listing < reuse < asked
+    assert '{"stores": [{"id": …, "root": …}, …]}' in section
+    assert "a run interrupted after registering the store and before writing" in section
+    assert "do not ask where the store lives or register it again" in section
+    # The reuse is passed to the script as `store_registered`, and only then.
+    flagged = section.find("set `store_registered` to `true`")
+    assert reuse < flagged < asked
+    assert "A `store_id` already recorded needs neither `store_path` nor `store_registered`." in section
+    example = text[text.find("## 4. Show the plan") : text.find("## 5. Approvals")]
+    assert '"store_id": "", "store_path": "", "store_registered": false' in example
+    assert (
+        "`store_registered` is `true` only when the store list held the id and no "
+        "`store_id` is recorded; the script refuses it alongside a `store_path`"
+    ) in example
+    report = text[text.find("## 6. Run the plan's own commands") :]
+    assert "say the store was reused, not registered" in report
+    # Listing is read-only: no store is registered before the plan's yes.
+    assert "openspec store setup" not in section
+
+
+def test_the_skill_registers_the_store_only_after_the_plan_s_yes_and_never_runs_git_init(
     plugin_root: Path,
 ) -> None:
     text = " ".join(_setup_skill_text(plugin_root).split())
@@ -833,11 +1237,76 @@ def test_the_skill_runs_git_init_and_the_store_registration_only_after_the_plan_
     # Nothing registers a store before the plan is shown.
     assert "openspec store setup" not in text[:plan]
     after_yes = text[run:]
-    git_init = after_yes.find("run `git init` in the project root")
     register = after_yes.find("`openspec store setup <id> --path <path>`")
     write = after_yes.find('setup.py" write')
-    assert -1 < git_init < register < write
-    assert "`git init` before the person's yes to the plan that shows them" in text
+    assert -1 < register < write
+    assert "`openspec store setup` before the person's yes to the plan that shows it" in text
+    # The skill never runs `git init` itself: it is only ever something the person does.
+    assert "run `git init` in the project root" not in text
+    assert "`git init`, if you ran it." not in text
+    never = text[text.find("## What this skill never does") :]
+    assert "Run `git init`, commit or stash" in never
+
+
+def test_the_skill_reads_porcelain_paths_unquoted(plugin_root: Path) -> None:
+    """Without `-z`, git quotes a path with a space or a non-ASCII character, and the
+    prefix is no longer at the front of it."""
+    text = " ".join(_setup_skill_text(plugin_root).split())
+    check = text[: text.find('setup.py" choices')]
+    assert "git status --porcelain=v1 -z --untracked-files=all -- ." in check
+    assert "`-z` is what makes that stripping safe" in check
+    assert "a space or a non-ASCII character" in check
+    assert "ended by a NUL byte" in check
+    assert "the original path" in check
+
+
+def test_the_store_question_says_a_path_inside_the_project_is_refused(
+    plugin_root: Path,
+) -> None:
+    text = " ".join(_setup_skill_text(plugin_root).split())
+    question = text[text.find("**Store location**") : text.find("## 3. Local visibility")]
+    assert "outside the project's own directory" in question
+    assert "the script refuses a path inside it" in question
+
+
+def test_the_skill_checks_the_clean_tree_before_asking_any_question(plugin_root: Path) -> None:
+    text = " ".join(_setup_skill_text(plugin_root).split())
+    status = text.find("git status --porcelain=v1 -z --untracked-files=all -- .")
+    choices = text.find('setup.py" choices')
+    questions = text.find("## 2. Ask, in this order")
+    assert -1 < status < choices < questions
+    check = text[status:choices]
+    assert "If `git rev-parse` fails, there is no repository" in check
+    assert "tell the person to run `git init` and commit first" in check
+    assert "a worktree and a project in a subdirectory of a repository both work" in check
+    prefix = check.find("git rev-parse --show-prefix")
+    assert prefix != -1
+    assert "relative to the repository's root, not the project's" in check
+    assert "strip the prefix `git rev-parse --show-prefix` printed" in check
+    assert "empty at the top of a repository" in check
+    strip = check.find("strip the prefix")
+    assert strip < check.find("The harness's own paths do not count")
+    assert "The harness's own paths do not count" in check
+    for path in (
+        "`AGENTS.md`",
+        "`CLAUDE.md`",
+        "`.harnex.yml`",
+        "`.harnex/`",
+        "`openspec/config.yaml`",
+        "`.claude/settings.json`",
+        "`.mcp.json`",
+        "`CLAUDE.local.md`",
+        "`.claude/settings.local.json`",
+    ):
+        assert path in check, f"{path} is missing from the paths that do not count"
+    assert "a rerun before the person commits what setup wrote" in check
+    assert "If the command lists any other path, stop" in check
+    assert "say to commit or stash them first" in check
+    assert "An untracked `.env` is the common case" in check
+    assert "`.git/info/exclude`" in check
+    assert "you do not do it for them here" in check
+    assert "Setup never runs `git init`, commits or stashes" in check
+    assert "The script's own conflict is what enforces it" in check
 
 
 def test_the_skill_shows_one_plan_and_asks_one_yes(plugin_root: Path) -> None:
@@ -851,7 +1320,6 @@ def test_the_skill_shows_one_plan_and_asks_one_yes(plugin_root: Path) -> None:
 def test_the_skill_s_final_report_names_every_side_effect(plugin_root: Path) -> None:
     text = " ".join(_setup_skill_text(plugin_root).split())
     report = text[text.find("every side effect beyond them, by name") :]
-    assert "`git init`, if you ran it." in report
     assert "The store registration — its id and its path" in report
     assert "`.env` added to `.git/info/exclude`" in report
     assert '`pluginConfigs."agents-md@builtin".options.instructionFiles`' in report

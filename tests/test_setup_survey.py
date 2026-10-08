@@ -12,10 +12,17 @@ from pathlib import Path
 import pytest
 
 import setup
-from conftest import tree
+from conftest import commit_all, git, tree
 
 
 def _plan(project: Path, plugin_root: Path, answers: dict) -> setup.Plan:
+    """Plan the fixture as it stands, committed first: setup only plans on a clean git
+    working tree (design.md D4), and these checks are about what it plans there."""
+    commit_all(project)
+    return _plan_as_is(project, plugin_root, answers)
+
+
+def _plan_as_is(project: Path, plugin_root: Path, answers: dict) -> setup.Plan:
     return setup.build_plan(
         project, plugin_root, setup.read_answers(json.dumps(answers), plugin_root)
     )
@@ -361,3 +368,131 @@ def test_the_env_notice_appears_only_when_jev_is_chosen(
     assert not any(".env" in notice for notice in plan.notices)
     assert ".env" not in setup.render_plan(plan)
     assert ".env" not in setup.plan_as_json(plan)
+
+
+# --- the clean-tree precondition (design.md D4) -------------------------------------
+
+
+def _refused(plan: setup.Plan) -> str:
+    """The conflict a failed precondition leaves: first in the plan, alongside every
+    other path, which is still planned and printed (design.md D4)."""
+    assert (plan.steps[0].path, plan.steps[0].action) == (setup.GIT_DIR, setup.CONFLICT)
+    assert [step.path for step in plan.steps].count(setup.GIT_DIR) == 1
+    assert setup.RULES in [step.path for step in plan.steps], "the rest is still planned"
+    assert setup.RULES in setup.render_plan(plan)
+    return plan.conflicts[0]
+
+
+@pytest.mark.parametrize("visibility", ["shared", "local"])
+def test_a_project_with_no_repository_is_a_conflict(
+    project: Path, plugin_root: Path, answers, setup_run, tmp_path: Path, visibility: str
+) -> None:
+    if visibility == "local":
+        answers.update(visibility="local", store_id="scratch", store_path=str(tmp_path / "s"))
+    (project / "README.md").write_text("mine\n", encoding="utf-8")
+    conflict = _refused(_plan_as_is(project, plugin_root, answers))
+    assert "not a git repository" in conflict
+    assert "`git init`" in conflict and "commit" in conflict
+
+    before = tree(project)
+    code, said = setup_run("write", project, answers, commit=False, home=tmp_path / "home")
+    assert code == 1 and "Conflicts" in said
+    assert tree(project) == before
+    assert not (project / ".git").exists(), "setup never creates the repository"
+
+
+@pytest.mark.parametrize("visibility", ["shared", "local"])
+def test_a_modified_file_is_a_conflict_listing_it(
+    project: Path, plugin_root: Path, answers, setup_run, tmp_path: Path, visibility: str
+) -> None:
+    if visibility == "local":
+        answers.update(visibility="local", store_id="scratch", store_path=str(tmp_path / "s"))
+    (project / "README.md").write_text("mine\n", encoding="utf-8")
+    commit_all(project)
+    (project / "README.md").write_text("changed\n", encoding="utf-8")
+    head = git(project, "rev-parse", "HEAD").stdout
+
+    conflict = _refused(_plan_as_is(project, plugin_root, answers))
+    assert "README.md" in conflict
+    assert "commit or stash" in conflict
+
+    before = tree(project)
+    code, said = setup_run("write", project, answers, commit=False, home=tmp_path / "home")
+    assert code == 1 and "README.md" in said
+    assert tree(project) == before
+    assert git(project, "rev-parse", "HEAD").stdout == head, "setup never commits"
+    assert git(project, "stash", "list").stdout == "", "setup never stashes"
+
+
+def test_an_untracked_file_is_a_conflict_listing_it(
+    project: Path, plugin_root: Path, answers
+) -> None:
+    commit_all(project)
+    (project / "notes").mkdir()
+    (project / "notes" / "draft.md").write_text("new\n", encoding="utf-8")
+    conflict = _refused(_plan_as_is(project, plugin_root, answers))
+    assert "notes/draft.md" in conflict, "every untracked file is listed, not its directory"
+
+
+def test_an_ignored_file_does_not_count(project: Path, plugin_root: Path, answers) -> None:
+    (project / ".gitignore").write_text("build/\n", encoding="utf-8")
+    commit_all(project)
+    (project / "build").mkdir()
+    (project / "build" / "out.bin").write_bytes(b"\0")
+    plan = _plan_as_is(project, plugin_root, answers)
+    assert not plan.conflicts
+    assert plan.writes
+
+
+def test_a_clean_repository_plans_as_usual(project: Path, plugin_root: Path, answers) -> None:
+    (project / "README.md").write_text("mine\n", encoding="utf-8")
+    commit_all(project)
+    plan = _plan_as_is(project, plugin_root, answers)
+    assert not plan.conflicts
+    assert all(step.path != setup.GIT_DIR for step in plan.steps)
+
+
+def test_a_failing_git_is_a_conflict(project: Path, plugin_root: Path, answers) -> None:
+    """A `.git` git cannot read is not a tree anyone can call clean."""
+    (project / ".git").write_text("gitdir: /nowhere\n", encoding="utf-8")
+    conflict = _refused(_plan_as_is(project, plugin_root, answers))
+    assert "`git` failed" in conflict and "/nowhere" in conflict
+
+
+def test_a_dirty_project_path_conflicts_and_the_harness_s_own_do_not(
+    project: Path, plugin_root: Path, answers
+) -> None:
+    """Only a path that is not the harness's own counts against the tree, and the
+    conflict lists that path alone while the plan still shows every other one."""
+    (project / "README.md").write_text("mine\n", encoding="utf-8")
+    commit_all(project)
+    (project / "README.md").write_text("changed\n", encoding="utf-8")
+    (project / setup.AGENTS).write_text("# half-written by an earlier run\n", encoding="utf-8")
+    (project / setup.CHOICES).write_text("project_name: scratch\n", encoding="utf-8")
+
+    plan = _plan_as_is(project, plugin_root, answers)
+    conflict = _refused(plan)
+    listed = conflict.splitlines()[1:]
+    assert [line.split()[-1] for line in listed] == ["README.md"]
+    rendered = setup.render_plan(plan)
+    for path in (*setup.PROJECT_PATHS, *setup.HARNESS_PATHS, setup.SETTINGS, setup.MANIFEST):
+        assert path in rendered
+
+
+def test_update_on_a_dirty_tree_is_not_refused(
+    project: Path, plugin_root: Path, answers
+) -> None:
+    (project / "README.md").write_text("mine\n", encoding="utf-8")
+    commit_all(project)
+    (project / "README.md").write_text("changed\n", encoding="utf-8")
+    (project / "untracked.txt").write_text("new\n", encoding="utf-8")
+    plan = _update_plan(project, plugin_root, answers)
+    assert all(step.path != setup.GIT_DIR for step in plan.steps)
+    assert not any("not clean" in conflict for conflict in plan.conflicts)
+
+
+def test_update_mode_does_not_check_the_tree(project: Path, plugin_root: Path, answers) -> None:
+    """Under `update` a shared project's harness-owned files may be uncommitted."""
+    (project / "README.md").write_text("mine\n", encoding="utf-8")
+    plan = _update_plan(project, plugin_root, answers)
+    assert all(step.path != setup.GIT_DIR for step in plan.steps)

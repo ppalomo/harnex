@@ -27,6 +27,7 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 import tempfile
 from dataclasses import dataclass, field
@@ -167,6 +168,10 @@ class Answers:
     # An answer of this run only (design.md D2): where `openspec store setup` registers the
     # store. It is planned, never recorded — `.harnex/config.yml` keeps the id alone.
     store_path: str = ""
+    # An answer of this run only (design.md D5): the skill found the store already
+    # registered under `store_id` (a run interrupted after registering and before writing),
+    # so it is reused rather than registered again. Never recorded either.
+    store_registered: bool = False
     global_instructions: bool = False
 
     def as_choices(self) -> dict[str, object]:
@@ -245,7 +250,7 @@ def read_answers(text: str, plugin_root: Path) -> Answers:
     approvals = raw.get("approvals", {})
     if not isinstance(approvals, dict):
         raise SetupError("`approvals` must be an object")
-    local_keys = {"visibility", "tools", "store_id", "store_path"}
+    local_keys = {"visibility", "tools", "store_id", "store_path", "store_registered"}
     unknown_keys = sorted(set(raw) - set(ANSWER_KEYS) - local_keys - {"approvals"})
     if unknown_keys:
         raise SetupError(
@@ -277,6 +282,9 @@ def read_answers(text: str, plugin_root: Path) -> Answers:
     store_path = raw.get("store_path", "")
     if not isinstance(store_path, str):
         raise SetupError("`store_path` must be text")
+    store_registered = raw.get("store_registered", False)
+    if not isinstance(store_registered, bool):
+        raise SetupError("`store_registered` must be true or false")
 
     answers = Answers(
         project_name=str(values["project_name"]),
@@ -294,6 +302,7 @@ def read_answers(text: str, plugin_root: Path) -> Answers:
         tools=tuple(tools_raw),
         store_id=store_id,
         store_path=store_path,
+        store_registered=store_registered,
         global_instructions=bool(approvals.get("global_instructions", False)),
     )
     validate_answers(answers, plugin_root)
@@ -368,6 +377,17 @@ def validate_answers(answers: Answers, plugin_root: Path) -> None:
         raise SetupError(
             "`store_path` is answered but `visibility` is not `local`; it would be read "
             "by nothing"
+        )
+    if answers.visibility != "local" and answers.store_registered:
+        raise SetupError(
+            "`store_registered` is answered but `visibility` is not `local`; it would be "
+            "read by nothing"
+        )
+    if answers.store_registered and answers.store_path.strip():
+        raise SetupError(
+            "`store_registered` and `store_path` are both answered: a store already "
+            "registered is reused, not registered again at a path. Leave `store_path` out "
+            "of the answers"
         )
     for path in answers.adopt:
         if path not in HARNESS_PATHS and path not in LOCAL_HARNESS_PATHS:
@@ -645,11 +665,7 @@ MERGE = "merge"
 CONFLICT = "conflict"
 MISSING = "missing"
 REGISTER = "register"
-# `git init` under local visibility when the project has no repository (design.md D4): a
-# plan line with nothing for `write` to write, run by the skill after the yes, and the
-# exclude entries that wait on it.
-INIT = "init"
-PENDING = "pending"
+REUSE = "reuse"
 GIT_DIR = ".git"
 
 
@@ -675,7 +691,13 @@ class Plan:
 
     @property
     def nothing_to_do(self) -> bool:
-        return not self.writes and not self.conflicts
+        """No write, no conflict, and no registration the skill would run after the yes
+        (design.md D2): a plan that registers a store still has work in it."""
+        return (
+            not self.writes
+            and not self.conflicts
+            and not any(step.action == REGISTER for step in self.steps)
+        )
 
 
 def _read(path: Path) -> bytes | None:
@@ -695,9 +717,23 @@ def build_plan(
     defaults to the real home directory and exists as a parameter purely so a test can
     stand a `tmp_path` in for it instead.
     """
+    repo = find_repository(project)
     if answers.visibility == "local":
-        return _build_local_plan(project, plugin_root, answers, mode, home or Path.home())
+        plan = _build_local_plan(project, plugin_root, answers, mode, home or Path.home(), repo)
+    else:
+        plan = _build_shared_plan(project, plugin_root, answers, mode, repo)
+    if mode == "setup":
+        _plan_clean_tree(plan, project, repo)
+    return plan
 
+
+def _build_shared_plan(
+    project: Path,
+    plugin_root: Path,
+    answers: Answers,
+    mode: Literal["setup", "update"],
+    repo: Repository,
+) -> Plan:
     plan = Plan(project=project)
     record = read_manifest(project)
     recorded_paths: dict[str, str] = dict(record["paths"]) if record else {}  # type: ignore[arg-type]
@@ -711,14 +747,156 @@ def build_plan(
         STATE_IGNORE: "the state directory ignores itself",
     }
 
-    _plan_project_files(plan, project, plugin_root, answers, mode)
+    _plan_project_files(plan, project, plugin_root, answers, repo, mode)
     _plan_harness_files(plan, project, answers, desired, why, recorded_paths, record is None)
-    if _env_excluded(project, answers):
-        _plan_git_exclude(plan, project, (ENV_FILE,))
+    if _env_excluded(repo, answers):
+        # Under `shared` the entry protects this clone alone (design.md D5).
+        _plan_git_exclude(plan, project, repo, (ENV_FILE,), owner="this clone")
     owned = _plan_settings(plan, project, plugin_root, record)
     mcp_owned = _plan_mcp(plan, project, plugin_root, answers, record)
     _plan_record(plan, project, desired, owned, mcp_owned)
     return plan
+
+
+# The paths setup itself writes or owns, under either visibility (design.md D4). An
+# uncommitted change to one of them never counts against the clean-tree precondition, so a
+# rerun before the first commit, or after an interruption, still plans.
+HARNESS_OWN_PATHS = (
+    AGENTS,
+    CLAUDE,
+    CHOICES,
+    OPENSPEC_CONFIG,
+    SETTINGS,
+    MCP_CONFIG,
+    CLAUDE_LOCAL,
+    SETTINGS_LOCAL,
+)
+HARNESS_OWN_DIR = ".harnex/"
+
+
+def _harness_own(path: str) -> bool:
+    """Whether a project-relative path is one setup itself writes or owns."""
+    return path in HARNESS_OWN_PATHS or path.startswith(HARNESS_OWN_DIR)
+
+
+@dataclass(frozen=True)
+class Repository:
+    """The git repository a project sits in, as git itself reports it — its own `.git`
+    directory, a worktree's `.git` file, or a parent directory's repository all count.
+
+    `prefix` is the project's own place inside the working tree (`""` at the top, else
+    `"sub/dir/"`), and `exclude` the repository's own local exclude file, resolved through
+    `git rev-parse --git-path info/exclude` so a worktree uses its common directory's.
+    `failure` says why git could not answer, when that is something other than there
+    being no repository at all."""
+
+    found: bool
+    prefix: str = ""
+    exclude: Path | None = None
+    failure: str = ""
+
+
+def _run_git(project: Path, *args: str) -> tuple[subprocess.CompletedProcess | None, str]:
+    """Run git in the project; the finished process, or nothing and why it did not run.
+
+    Always under `LC_ALL=C` (design.md D5): git's messages are read, not only shown, so
+    telling "no repository" from a git failure must not depend on the person's locale."""
+    try:
+        finished = subprocess.run(
+            ["git", "-C", str(project), *args],
+            capture_output=True,
+            text=True,
+            env={**os.environ, "LC_ALL": "C"},
+        )
+    except OSError as error:
+        return None, str(error)
+    return finished, (finished.stderr or "").strip() or f"exit status {finished.returncode}"
+
+
+def find_repository(project: Path) -> Repository:
+    """Ask git, never the filesystem, where the project's repository is (design.md D4)."""
+    finished, failure = _run_git(
+        project, "rev-parse", "--show-prefix", "--git-path", "info/exclude"
+    )
+    if finished is None:
+        return Repository(found=False, failure=failure)
+    if finished.returncode != 0:
+        if "or any of the parent directories" in failure:
+            return Repository(found=False)
+        return Repository(found=False, failure=failure)
+    lines = finished.stdout.splitlines()
+    if len(lines) != 2:
+        return Repository(found=False, failure=f"unexpected output: {finished.stdout!r}")
+    prefix, exclude = lines
+    # git answers relative to the directory it ran in, which is the project.
+    return Repository(
+        found=True, prefix=prefix, exclude=Path(os.path.normpath(project / exclude))
+    )
+
+
+def _plan_clean_tree(plan: Plan, project: Path, repo: Repository) -> None:
+    """Setup's precondition, under either visibility (design.md D4): the project sits in a
+    git repository whose working tree is clean apart from the harness's own paths,
+    untracked files included and ignored files not. When it fails, the conflict joins the
+    plan's others, first, and the rest of the plan stays in it, so every path is still
+    printed; `write`'s own re-survey refuses on the same terms. Setup never runs
+    `git init`, commits or stashes to get past it.
+
+    Only `setup` checks it: `update` refreshes harness-owned paths only and asks nothing,
+    so `build_plan` never calls this under `mode="update"`. When the project is a
+    subdirectory of its repository, only the project's own subtree is checked
+    (`git status -- .`): the rest of the repository is not the project's."""
+    if not repo.found and not repo.failure:
+        plan.steps.insert(0, Step(GIT_DIR, "project", CONFLICT, "not a git repository"))
+        plan.conflicts.insert(
+            0,
+            "This is not a git repository. Setup runs only on a clean git working tree: "
+            "run `git init`, commit the project as it is, and run setup again. Setup never "
+            "creates the repository itself.",
+        )
+        return
+    if repo.found:
+        finished, failure = _run_git(
+            project, "status", "--porcelain=v1", "-z", "--untracked-files=all", "--", "."
+        )
+    else:
+        finished, failure = None, repo.failure
+    if finished is None or finished.returncode != 0:
+        plan.steps.insert(0, Step(GIT_DIR, "project", CONFLICT, "`git` failed"))
+        plan.conflicts.insert(
+            0,
+            f"`git` failed here ({failure}), so setup cannot tell whether the working "
+            "tree is clean. Setup runs only on a clean git working tree: make "
+            "`git status` work, commit, and run setup again.",
+        )
+        return
+
+    dirty = []
+    fields = iter(finished.stdout.split("\0"))
+    for entry in fields:
+        if not entry:
+            continue
+        status, path = entry[:2], entry[3:]
+        paths = [path]
+        if "R" in status or "C" in status:
+            paths.append(next(fields, ""))  # a rename or copy names its origin next
+        for named in filter(None, paths):
+            inside = named.startswith(repo.prefix)
+            shown = named[len(repo.prefix):] if inside else named
+            if not (inside and _harness_own(shown)):
+                dirty.append(f"{status} {shown}")
+    if not dirty:
+        return
+    plan.steps.insert(
+        0, Step(GIT_DIR, "project", CONFLICT, f"{len(dirty)} path(s) not committed")
+    )
+    plan.conflicts.insert(
+        0,
+        "The working tree is not clean. Setup runs only on a clean git working tree: "
+        "commit or stash these changes, and run setup again. Setup never commits or "
+        "stashes them itself. The harness's own paths do not count.\n"
+        + "\n".join("    " + line for line in dirty),
+    )
 
 
 def _plan_project_files(
@@ -726,6 +904,7 @@ def _plan_project_files(
     project: Path,
     plugin_root: Path,
     answers: Answers,
+    repo: Repository,
     mode: Literal["setup", "update"] = "setup",
 ) -> None:
     pointers = {
@@ -800,26 +979,17 @@ def _plan_project_files(
                 )
             )
 
-    _maybe_jev_notice(plan, project, answers)
+    _maybe_jev_notice(plan, repo, answers)
 
 
-def _git_init_pending(project: Path, answers: Answers) -> bool:
-    """Under local visibility a missing repository is created by the skill, after the
-    yes and before `write` (design.md D4); under `shared` it is never setup's to create."""
-    return answers.visibility == "local" and not (project / GIT_DIR).is_dir()
-
-
-def _env_excluded(project: Path, answers: Answers) -> bool:
+def _env_excluded(repo: Repository, answers: Answers) -> bool:
     """`.env` joins the repository's own exclude list when `jev` is chosen and the
-    project is a git repository, under either visibility (design.md D3), or will be one
-    once the planned `git init` has run (D4). The entry is planned whether or not `.env`
-    exists yet: the person creates it next."""
-    return answers.decision_model == "jev" and (
-        (project / GIT_DIR).is_dir() or _git_init_pending(project, answers)
-    )
+    project sits in a git repository, under either visibility (design.md D3). The entry
+    is planned whether or not `.env` exists yet: the person creates it next."""
+    return answers.decision_model == "jev" and repo.found
 
 
-def _maybe_jev_notice(plan: Plan, project: Path, answers: Answers) -> None:
+def _maybe_jev_notice(plan: Plan, repo: Repository, answers: Answers) -> None:
     if answers.decision_model != "jev":
         return
     notice = (
@@ -827,13 +997,7 @@ def _maybe_jev_notice(plan: Plan, project: Path, answers: Answers) -> None:
         "for the key when the environment variable is unset. It must declare the line "
         "`OPENROUTER_API_KEY=` followed by the value. "
     )
-    if _git_init_pending(project, answers) and _env_excluded(project, answers):
-        notice += (
-            f"Setup adds {ENV_FILE} to {GIT_EXCLUDE} once `git init` has created the "
-            "repository, in this same run and before any commit can exist, whether or not "
-            "the file exists yet."
-        )
-    elif _env_excluded(project, answers):
+    if _env_excluded(repo, answers):
         notice += (
             f"Setup adds {ENV_FILE} to {GIT_EXCLUDE}, so git ignores it in this clone, "
             "whether or not the file exists yet."
@@ -1141,7 +1305,7 @@ def _plan_local_entry_files(plan: Plan, project: Path) -> None:
 
 
 def _plan_local_config(
-    plan: Plan, project: Path, plugin_root: Path, answers: Answers, mode: str
+    plan: Plan, project: Path, plugin_root: Path, answers: Answers, repo: Repository, mode: str
 ) -> None:
     """`.harnex/config.yml`, local visibility's own answers file (design.md D2) — created
     once, from the template, exactly like `.harnex.yml` under `shared` visibility, and
@@ -1166,7 +1330,7 @@ def _plan_local_config(
     else:
         plan.steps.append(Step(LOCAL_CHOICES, "project", KEEP, "the project's own, left alone"))
 
-    _maybe_jev_notice(plan, project, answers)
+    _maybe_jev_notice(plan, repo, answers)
 
 
 # Every local-visibility path that cannot live inside a self-ignoring directory
@@ -1175,7 +1339,7 @@ GIT_EXCLUDE_PATHS = (CLAUDE_LOCAL, SETTINGS_LOCAL)
 
 
 def _plan_git_exclude(
-    plan: Plan, project: Path, paths: tuple[str, ...], git_init_pending: bool = False
+    plan: Plan, project: Path, repo: Repository, paths: tuple[str, ...], owner: str = "local"
 ) -> None:
     """Keep every root-level local-visibility path out of git without ever touching the
     project's own ignore file (local-visibility spec: "a path that cannot live inside [a
@@ -1183,56 +1347,48 @@ def _plan_git_exclude(
     `.git/info/exclude`"). The same entry list carries `.env` when `jev` is chosen, under
     either visibility (design.md D3); the caller decides which paths it holds.
 
-    With no repository under local visibility, the entries wait on a `git init` step the
-    skill runs after the yes (design.md D4): both are plan lines with nothing to write, and
-    `write`'s own re-survey finds `.git` and plans the entries as an ordinary write."""
-    if git_init_pending:
-        plan.steps.append(
-            Step(
-                GIT_DIR,
-                "local",
-                INIT,
-                "no repository here: `git init` creates one after your yes, before anything "
-                "is written",
-            )
-        )
-        plan.steps.append(
-            Step(
-                GIT_EXCLUDE,
-                "local",
-                PENDING,
-                f"{', '.join(paths)} to be added to the repository's own local exclude "
-                "list once `git init` has run",
-            )
-        )
-        return
-    if not (project / GIT_DIR).is_dir():
-        plan.steps.append(Step(GIT_EXCLUDE, "local", CONFLICT, "no .git directory here"))
+    The file is the repository's own, as git resolves it (design.md D4): for a worktree
+    it lies in the common directory, for a subdirectory in the parent's `.git`, so the
+    step names it by its absolute path whenever it lies outside the project — the same
+    way the one global offer names its file. Each entry is anchored to the project's
+    own place in the working tree, so it matches the project's path and nothing else
+    (`""` at the top of the tree, where the entries are exactly the paths).
+
+    Under `setup` the clean-tree precondition (design.md D4) already reports a missing
+    repository; the conflict below is the exclude step's own line for it, and what
+    `update` meets when there is none."""
+    if not repo.found or repo.exclude is None:
+        plan.steps.append(Step(GIT_EXCLUDE, owner, CONFLICT, "not in a git repository"))
+        # Only local visibility reaches this: `.env` alone is planned only in a repository.
         plan.conflicts.append(
-            f"Local visibility excludes {', '.join(paths)} through "
-            f"{GIT_EXCLUDE}, which needs a git repository. Run `git init` first, or "
-            "choose `shared` visibility."
+            f"Local visibility excludes {', '.join(paths)} through the repository's own "
+            f"{GIT_EXCLUDE}, which needs a git repository. Run `git init` and commit "
+            "first."
         )
         return
 
-    exclude_path = project / GIT_EXCLUDE
-    current = _read(exclude_path)
+    try:
+        label = repo.exclude.relative_to(project).as_posix()
+    except ValueError:
+        label = str(repo.exclude)
+    entries = [repo.prefix + path for path in paths]
+    current = _read(repo.exclude)
     text = current.decode("utf-8", errors="replace") if current is not None else ""
     existing = set(text.splitlines())
-    missing = [path for path in paths if path not in existing]
+    missing = [entry for entry in entries if entry not in existing]
     if not missing:
         plan.steps.append(
-            Step(GIT_EXCLUDE, "local", UNCHANGED, f"{', '.join(paths)} already excluded")
+            Step(label, owner, UNCHANGED, f"{', '.join(entries)} already excluded")
         )
         return
 
     new_text = text if (not text or text.endswith("\n")) else text + "\n"
-    new_text += "".join(f"{path}\n" for path in missing)
+    new_text += "".join(f"{entry}\n" for entry in missing)
     action = CREATE if current is None else UPDATE
     plan.steps.append(
         Step(
-            GIT_EXCLUDE,
-            "local",
+            label,
+            owner,
             action,
             f"{', '.join(missing)} added to the repository's own local exclude list",
             new_text.encode("utf-8"),
@@ -1268,6 +1424,24 @@ def _recorded_store_id(project: Path) -> str:
     return str(values["store_id"]).strip()
 
 
+def _refuse_store_inside_project(project: Path, store_path: str) -> None:
+    """A store registered inside the project would create an `openspec/` directory in
+    it, which `local` visibility exists to avoid. `~` is expanded; a relative path is
+    read against the project root, since that is where the skill runs
+    `openspec store setup`. The project root itself counts as inside."""
+    root = project.resolve()
+    store = Path(store_path.strip()).expanduser()
+    if not store.is_absolute():
+        store = root / store
+    store = store.resolve()
+    if store == root or root in store.parents:
+        raise SetupError(
+            f"`store_path` `{store_path}` resolves to `{store}`, inside the project's own "
+            "directory, so it is refused: registering a store there would create an "
+            "`openspec/` directory in the project. Choose a folder outside it"
+        )
+
+
 def _plan_local_store(
     plan: Plan, project: Path, answers: Answers, mode: Literal["setup", "update"]
 ) -> None:
@@ -1278,8 +1452,20 @@ def _plan_local_store(
 
     A `store_path` turns the line into the registration the skill runs after the yes
     (design.md D2); this script never shells out to do it. Without a recorded store id
-    there is nothing to reuse, so the path is the one answer that cannot be empty."""
+    there is nothing to reuse, so the path is the one answer that cannot be empty; with
+    one, the store is reused, and a path answered alongside it is refused rather than
+    planned as a second registration. `store_registered` with no recorded id (design.md
+    D5) is a store an interrupted run already registered: it is reused, nothing is
+    registered, and `.harnex/config.yml` records its id on `write` like any other."""
+    recorded = _recorded_store_id(project)
     if answers.store_path.strip():
+        if recorded:
+            raise SetupError(
+                f"`{LOCAL_CHOICES}` already records store `{recorded}`, so `store_path` "
+                "is refused: the recorded store is reused and no second store is "
+                "registered. Leave `store_path` out of the answers"
+            )
+        _refuse_store_inside_project(project, answers.store_path)
         plan.steps.append(
             Step(
                 "openspec store",
@@ -1290,7 +1476,18 @@ def _plan_local_store(
             )
         )
         return
-    if mode == "setup" and not _recorded_store_id(project):
+    if answers.store_registered and not recorded:
+        plan.steps.append(
+            Step(
+                "openspec store",
+                "local",
+                REUSE,
+                f"reuse store `{answers.store_id}`, already registered; this project's "
+                "own propose/apply/verify/ship work uses it",
+            )
+        )
+        return
+    if mode == "setup" and not recorded:
         raise SetupError(
             "`visibility` is `local` and no store id is recorded yet, so `store_path` is "
             "needed: it is where `openspec store setup` registers the store"
@@ -1398,6 +1595,7 @@ def _build_local_plan(
     answers: Answers,
     mode: Literal["setup", "update"],
     home: Path,
+    repo: Repository,
 ) -> Plan:
     """Local visibility's own plan (docs/PLAN.md C7, design.md): every path either lives
     inside a self-ignoring directory, is excluded through `.git/info/exclude`, or — for
@@ -1424,10 +1622,10 @@ def _build_local_plan(
     }
 
     _plan_local_entry_files(plan, project)
-    _plan_local_config(plan, project, plugin_root, answers, mode)
+    _plan_local_config(plan, project, plugin_root, answers, repo, mode)
     _plan_harness_files(plan, project, answers, desired, why, recorded_paths, record is None)
-    exclude_paths = GIT_EXCLUDE_PATHS + ((ENV_FILE,) if _env_excluded(project, answers) else ())
-    _plan_git_exclude(plan, project, exclude_paths, _git_init_pending(project, answers))
+    exclude_paths = GIT_EXCLUDE_PATHS + ((ENV_FILE,) if _env_excluded(repo, answers) else ())
+    _plan_git_exclude(plan, project, repo, exclude_paths)
     owned = _plan_settings(plan, project, plugin_root, record, target=SETTINGS_LOCAL, owner="local")
     _plan_local_mcp_notice(plan, plugin_root, answers)
     _plan_local_store(plan, project, answers, mode)
@@ -1483,20 +1681,13 @@ def write_atomic(path: Path, data: bytes) -> None:
 def apply_plan(plan: Plan) -> list[str]:
     if plan.conflicts:
         raise SetupError("the plan has conflicts, so nothing was written")
-    if any(step.action == INIT for step in plan.steps):
-        # The plan still waits on `git init` (design.md D4): writing now would leave the
-        # exclude entries unwritten while the rest landed, so nothing is written at all.
-        raise SetupError(
-            "there is no git repository here yet, so the exclude entries cannot be written; "
-            "run `git init` (the plan's own step) and then write, or choose `shared` "
-            "visibility. Nothing was written"
-        )
     written = []
     for step in plan.steps:
         if step.data is None:
             continue
         # Every step's path is project-relative, except local visibility's one global
-        # offer (design.md D7), which names an absolute path outside the project.
+        # offer (design.md D7) and an exclude file that lies outside the project (a
+        # worktree's or a parent repository's, design.md D4), which name absolute paths.
         target = Path(step.path) if Path(step.path).is_absolute() else plan.project / step.path
         write_atomic(target, step.data)
         written.append(step.path)
@@ -1509,8 +1700,11 @@ def apply_plan(plan: Plan) -> list[str]:
 def render_plan(plan: Plan, verb: str = "plan") -> str:
     lines = [f"Plan for {plan.project}", ""]
     width = max(len(step.path) for step in plan.steps)
+    owners = max([7] + [len(step.owner) for step in plan.steps])
     for step in plan.steps:
-        lines.append(f"  {step.action:<9} {step.path:<{width}}  {step.owner:<7}  {step.detail}")
+        lines.append(
+            f"  {step.action:<9} {step.path:<{width}}  {step.owner:<{owners}}  {step.detail}"
+        )
     if plan.notices:
         lines += ["", "Notices"]
         for notice in plan.notices:
