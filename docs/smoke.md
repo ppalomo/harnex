@@ -173,9 +173,11 @@ manifest and `${CLAUDE_PLUGIN_ROOT}`), OpenSpec 1.11.0, Python 3.13 through `uv`
    claude plugin install harnex@harnex
    claude plugin details harnex
    ```
-2. Make an empty scratch project and open a session in it:
+2. Make a scratch project, commit it as it is — setup runs only on a git repository with
+   nothing to commit (`C9`) — and open a session in it:
    ```bash
    mkdir -p /tmp/harnex-scratch && cd /tmp/harnex-scratch && git init -q
+   printf '# scratch\n' > README.md && git add -A && git commit -qm "first commit"
    claude
    ```
 3. Run `/harnex:setup`. Answer the questions: accept the directory name, keep all six
@@ -190,9 +192,14 @@ manifest and `${CLAUDE_PLUGIN_ROOT}`), OpenSpec 1.11.0, Python 3.13 through `uv`
    cat .harnex/state/.gitignore
    git status --short --untracked-files=all
    ```
-5. Run `/harnex:setup` again in the same session and read the plan.
+5. Run `/harnex:setup` again in the same session, before committing anything, and read
+   what it says. Then commit what setup wrote and run `/harnex:setup` once more:
+   ```bash
+   git add -A && git commit -qm "harnessed"
+   ```
 6. Leave the session. Prove the same sequence from the script, which is what the command
-   drives, and prove what it refuses:
+   drives, and prove what it refuses — the hand edit is committed, as someone else's would
+   be, so the tree is clean and the refusal is about the file, not the tree:
    ```bash
    cd ~/Developer/harnex     # your checkout
    cat > /tmp/harnex-answers.json <<'JSON'
@@ -203,10 +210,12 @@ manifest and `${CLAUDE_PLUGIN_ROOT}`), OpenSpec 1.11.0, Python 3.13 through `uv`
    uv run plugin/scripts/setup.py choices
    uv run plugin/scripts/setup.py plan --answers /tmp/harnex-answers.json --project /tmp/harnex-scratch
    echo "rules I wrote by hand" > /tmp/harnex-scratch/.harnex/rules.md
+   git -C /tmp/harnex-scratch commit -qam "rules edited by hand"
    uv run plugin/scripts/setup.py write --answers /tmp/harnex-answers.json --project /tmp/harnex-scratch; echo "exit $?"
    git -C /tmp/harnex-scratch status --short
    ```
-7. Restore the file the harness owns, by adopting it, and check the tree afterwards:
+7. Restore the file the harness owns, by adopting it, check the tree afterwards, and
+   commit the result:
    ```bash
    python3 - <<'PY'
    import json, pathlib
@@ -215,6 +224,7 @@ manifest and `${CLAUDE_PLUGIN_ROOT}`), OpenSpec 1.11.0, Python 3.13 through `uv`
    PY
    uv run plugin/scripts/setup.py write --answers /tmp/harnex-answers.json --project /tmp/harnex-scratch
    git -C /tmp/harnex-scratch status --short
+   git -C /tmp/harnex-scratch commit -qam "rules adopted back"
    ```
 8. Now an existing project. Copy one of your own — or build one that looks like one — and
    set it up:
@@ -237,10 +247,10 @@ manifest and `${CLAUDE_PLUGIN_ROOT}`), OpenSpec 1.11.0, Python 3.13 through `uv`
    git diff .claude/settings.json | head -30
    git diff AGENTS.md
    ```
-9. Run setup once more in that project and read the notices.
-10. A fresh clone of the scratch project:
+9. Commit what setup wrote (`git add -A && git commit -qm "harnessed"`), run setup once
+   more in that project and read the notices.
+10. A fresh clone of the scratch project, committed since step 7:
     ```bash
-    cd /tmp/harnex-scratch && git add -A && git commit -qm "harnessed"
     git clone -q /tmp/harnex-scratch /tmp/harnex-clone
     cd ~/Developer/harnex
     uv run plugin/scripts/setup.py plan --answers /tmp/harnex-answers.json --project /tmp/harnex-clone
@@ -270,21 +280,28 @@ manifest and `${CLAUDE_PLUGIN_ROOT}`), OpenSpec 1.11.0, Python 3.13 through `uv`
   `deny` and 36 `ask` entries and nothing else; `git status` shows the new files and
   **nothing under `.harnex/state/`** — the directory ignores itself, and your `.gitignore`
   was never touched.
-- Step 5: "Nothing to do: this project is already set up as these answers describe." No
-  file changes, the record included.
+- Step 5: the first rerun goes ahead even though nothing is committed: every uncommitted
+  path is one setup itself just wrote, and the harness's own paths do not count against
+  the clean tree (`C9`). It says "Nothing to do: this project is already set up as these
+  answers describe." After the commit, the second rerun says the same. No file changes,
+  the record included.
 - Step 6: `choices` lists the six sets, empty profiles and features, the two backends and
   the proposed word. The first `plan` reports every path as `keep` or `unchanged`. After the
-  rules file is edited by hand, `write` **exits 1**, names the file, says it was edited
-  after the harness wrote it, and offers adoption — and `git status` proves nothing else was
-  written.
-- Step 7: adoption replaces only that file, and the tree is clean again.
+  rules file is edited by hand and committed, `write` **exits 1**, names the file, says it
+  was edited after the harness wrote it, and offers adoption — and `git status` prints
+  nothing, proving nothing was written.
+- Step 7: adoption replaces only that file: `git status --short` shows `.harnex/rules.md`
+  modified and nothing else, back to the harness's own rendering, and the tree is clean
+  again once that is committed.
 - Step 8: `git diff --stat` shows `CLAUDE.md` and `.claude/settings.json` and nothing else.
   `AGENTS.md` is **byte-identical** — you declined, so nothing was inserted. The settings
   diff adds the floor's entries and leaves `Read(./secret.txt)`, `Bash(git *)` and `env`
   exactly as they were. The notices told you that your `Bash(git *)` allow covers floor
   entries and has no effect on them, because the host resolves deny, then ask, then allow.
-- Step 9: the notice about `AGENTS.md` is repeated, word for word. A declined line is not
-  remembered anywhere — its absence is what brings the notice back.
+- Step 9: the notice about `AGENTS.md` is repeated, word for word — and would be without
+  the commit too, since `CLAUDE.md` and the settings are the harness's own paths and do
+  not count against the clean tree. A declined line is not remembered anywhere — its absence is what
+  brings the notice back.
 - Step 10: the clone is recognised from the committed record: every committed path is
   `unchanged`, and the only thing to write is `.harnex/state/.gitignore`, which is
   deliberately not committed. It asks nothing.
@@ -311,9 +328,11 @@ registration), Python 3.13 through `uv`.
    claude plugin install harnex@harnex
    claude plugin details harnex
    ```
-2. Set up a scratch project choosing only the `canary` set:
+2. Set up a scratch project choosing only the `canary` set, starting from a committed
+   repository as setup requires, and commit what it writes:
    ```bash
    mkdir -p /tmp/harnex-canary && cd /tmp/harnex-canary && git init -q
+   printf '# canary\n' > README.md && git add -A && git commit -qm "first commit"
    cd ~/Developer/harnex
    cat > /tmp/harnex-canary-answers.json <<'JSON'
    {"project_name": "canary-smoke", "profiles": [], "sets": ["canary"], "features": [],
@@ -322,6 +341,7 @@ registration), Python 3.13 through `uv`.
    JSON
    uv run plugin/scripts/setup.py write --answers /tmp/harnex-canary-answers.json \
      --project /tmp/harnex-canary
+   git -C /tmp/harnex-canary add -A && git -C /tmp/harnex-canary commit -qm "harnessed"
    grep -A3 "## Canary" /tmp/harnex-canary/AGENTS.md
    ```
 3. Open a session in it (`cd /tmp/harnex-canary && claude`) and ask anything. Read the
@@ -405,6 +425,7 @@ step 6 is where that gets its first real check.
    `PATH` (harnex never installs OpenSpec itself):
    ```bash
    mkdir -p /tmp/harnex-propose && cd /tmp/harnex-propose && git init -q
+   printf '# propose\n' > README.md && git add -A && git commit -qm "first commit"
    cd ~/Developer/harnex
    cat > /tmp/harnex-propose-answers.json <<'JSON'
    {"project_name": "propose-smoke", "profiles": [], "sets": ["git", "sdd"], "features": [],
@@ -484,6 +505,7 @@ live `jev` call as its.
    `PATH`:
    ```bash
    mkdir -p /tmp/harnex-apply && cd /tmp/harnex-apply && git init -q -b main
+   printf '# apply\n' > README.md && git add -A && git commit -qm "first commit"
    cd ~/Developer/harnex
    cat > /tmp/harnex-apply-answers.json <<'JSON'
    {"project_name": "apply-smoke", "profiles": [], "sets": ["git", "sdd", "code"], "features": [],
@@ -550,6 +572,7 @@ the project).
 1. Set up a scratch project with the `git` and `sdd` sets:
    ```bash
    mkdir -p /tmp/harnex-update && cd /tmp/harnex-update && git init -q
+   printf '# update\n' > README.md && git add -A && git commit -qm "first commit"
    cd ~/Developer/harnex
    cat > /tmp/harnex-update-answers.json <<'JSON'
    {"project_name": "update-smoke", "profiles": [], "sets": ["git", "sdd"], "features": [],
@@ -643,7 +666,8 @@ on one with its own existing, committed `AGENTS.md`.
 
 **Steps**
 
-1. Set up a scratch project that already looks like a team's own repository:
+1. Set up a scratch project that already looks like a team's own repository, committed,
+   since setup runs only on a clean tree (`C9`):
    ```bash
    mkdir -p /tmp/harnex-local && cd /tmp/harnex-local && git init -q
    git config user.email t@t.com && git config user.name t
@@ -651,23 +675,25 @@ on one with its own existing, committed `AGENTS.md`.
    git add -A && git commit -qm "existing brief"
    cd ~/Developer/harnex
    ```
-2. Register a local OpenSpec store for it and build the answers document, `store_id`
-   included:
+2. Build the answers document, `store_id` and `store_path` included — the store is not
+   registered yet; since `C9` that is a line of the plan, run only after the yes to it:
    ```bash
-   openspec store setup harnex-local-smoke --path /tmp/harnex-local-store --json
    cat > /tmp/harnex-local-answers.json <<'JSON'
    {"project_name": "local-smoke", "profiles": [], "sets": ["git", "sdd"], "features": [],
     "canary": "", "decision_model": "mock", "check_command": "make check",
     "approvals": {"pointer_agents": false, "pointer_claude": false, "adopt": []},
-    "visibility": "local", "tools": ["claude"], "store_id": "harnex-local-smoke"}
+    "visibility": "local", "tools": ["claude"], "store_id": "harnex-local-smoke",
+    "store_path": "/tmp/harnex-local-store"}
    JSON
    ```
-3. Plan, then write, with a scratch home directory so the one global offer never touches
-   your own `~/.claude/settings.json`:
+3. Plan, register the store the plan names (what the skill does after your yes), then
+   write, with a scratch home directory so the one global offer never touches your own
+   `~/.claude/settings.json`:
    ```bash
    mkdir -p /tmp/harnex-local-home
    uv run plugin/scripts/setup.py plan --answers /tmp/harnex-local-answers.json \
      --project /tmp/harnex-local --home /tmp/harnex-local-home
+   openspec store setup harnex-local-smoke --path /tmp/harnex-local-store --json
    uv run plugin/scripts/setup.py write --answers /tmp/harnex-local-answers.json \
      --project /tmp/harnex-local --home /tmp/harnex-local-home
    ```
@@ -679,10 +705,13 @@ on one with its own existing, committed `AGENTS.md`.
    cat /tmp/harnex-local/CLAUDE.local.md
    cat /tmp/harnex-local/.git/info/exclude
    ```
-5. Run setup again, unchanged: nothing is proposed, and the recorded `store_id` would be
-   reused rather than registering a second store:
+5. Run setup again with `store_path` left empty, as the skill does once a `store_id` is
+   recorded: nothing is proposed, and the recorded `store_id` is reused rather than
+   registering a second store:
    ```bash
-   uv run plugin/scripts/setup.py plan --answers /tmp/harnex-local-answers.json \
+   sed 's|"/tmp/harnex-local-store"|""|' /tmp/harnex-local-answers.json \
+     > /tmp/harnex-local-rerun.json
+   uv run plugin/scripts/setup.py plan --answers /tmp/harnex-local-rerun.json \
      --project /tmp/harnex-local --home /tmp/harnex-local-home
    ```
 
@@ -692,16 +721,23 @@ on one with its own existing, committed `AGENTS.md`.
   every surveyed path, whether or not it writes it — but writes only
   `CLAUDE.local.md`, `.harnex/config.yml`, `.harnex/rules.md`, `.harnex/.gitignore`,
   `.git/info/exclude` and `.claude/settings.local.json`; `AGENTS.md`/`CLAUDE.md` never
-  get a write action. A notice about the one global settings offer also appears, since
-  `/tmp/harnex-local-home/.claude/settings.json` does not exist yet.
+  get a write action. It also shows "register store `harnex-local-smoke` at
+  `/tmp/harnex-local-store`" as a step, and the global settings offer as a line naming
+  `pluginConfigs."agents-md@builtin".options.instructionFiles` and its value, not
+  approved — `/tmp/harnex-local-home/.claude/settings.json` does not exist yet.
 - Step 4: plain `git status --porcelain` prints nothing at all — the existing `AGENTS.md`
   commit is the only history this repository has. `--ignored` shows `.harnex/` and the
   two root-level files as ignored, not merely absent from the listing.
   `/tmp/harnex-local/AGENTS.md` still reads "# an existing team brief", byte for byte.
   `CLAUDE.local.md` holds one line, `@.harnex/rules.md`. `.git/info/exclude` lists both
   `CLAUDE.local.md` and `.claude/settings.local.json`.
-- Step 5: "Nothing to do" — not a second store registration, not a second insertion
-  attempt, not a rewritten `.harnex/config.yml`.
+- Step 5: "Nothing to do" — no "register store" step, not a second insertion attempt,
+  not a rewritten `.harnex/config.yml`. Nothing is committed, yet the rerun is not refused
+  as an unclean tree (`C9`): everything step 3 wrote is ignored, and ignored files do not
+  count — nor would the harness's own paths if they were not. The same holds in a git
+  worktree or a subdirectory of a repository: the repository is found with
+  `git rev-parse`, and the exclude entries land in that repository's own list, anchored
+  to the project's prefix in a subdirectory.
 
 ---
 
@@ -727,6 +763,7 @@ single yes/no ask `ship` always asked, unchanged.
    ```bash
    mkdir -p /tmp/harnex-shipbump && cd /tmp/harnex-shipbump && git init -q -b main
    git config user.email t@t.com && git config user.name t
+   printf '# shipbump\n' > README.md && git add -A && git commit -qm "first commit"
    cd ~/Developer/harnex
    cat > /tmp/harnex-shipbump-answers.json <<'JSON'
    {"project_name": "shipbump-smoke", "profiles": [], "sets": ["git", "sdd"], "features": [],

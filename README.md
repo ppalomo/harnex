@@ -76,7 +76,15 @@ claude plugin install codex@openai-codex
 project you open on this machine, not just the one you ran it from. Pass `--scope project`
 or `--scope local` instead if you want it scoped differently.
 
-Once per project, new or existing, from inside Claude Code:
+The project must be inside a git repository with nothing to commit outside the harness's
+own files; setup stops otherwise. For a new folder, make it one first:
+
+```bash
+git init
+git add -A && git commit -m "initial commit"
+```
+
+Then, once per project, new or existing, from inside Claude Code:
 
 ```
 /harnex:setup

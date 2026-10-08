@@ -42,6 +42,7 @@ sys.path.insert(0, str(REPO_ROOT / "plugin" / "feedback" / "canary"))
 import copy  # noqa: E402
 import io  # noqa: E402
 import json  # noqa: E402
+import subprocess  # noqa: E402
 from contextlib import redirect_stderr, redirect_stdout  # noqa: E402
 
 import setup as setup_script  # noqa: E402  (a plugin script, reached by path)
@@ -72,11 +73,45 @@ def project(tmp_path: Path) -> Path:
     return path
 
 
+def git(project: Path, *args: str) -> subprocess.CompletedProcess:
+    """Run git inside a fixture project, never against the repository the checks live in."""
+    return subprocess.run(
+        ["git", "-C", str(project), *args], check=True, capture_output=True, text=True
+    )
+
+
+def commit_all(project: Path) -> None:
+    """Bring a fixture project to what setup requires before it plans (design.md D4): a
+    git repository with a clean working tree. Creates the repository if there is none,
+    with an identity and signing of its own so the person's global settings never reach
+    it, then commits whatever the fixture holds."""
+    if not (project / ".git").exists():
+        git(project, "init", "-q")
+        git(project, "config", "user.email", "test@test.com")
+        git(project, "config", "user.name", "test")
+        git(project, "config", "commit.gpgsign", "false")
+    git(project, "add", "-A")
+    git(project, "commit", "-q", "--allow-empty", "--no-verify", "-m", "fixture")
+
+
 @pytest.fixture
 def setup_run(tmp_path: Path, plugin_root: Path):
-    """Run the script the way its command line does, and return what it said."""
+    """Run the script the way its command line does, and return what it said.
 
-    def run(verb: str, project: Path, answers: dict, *, as_json: bool = False, home: Path | None = None):
+    By default the project is committed first (`commit_all`), since setup only plans on a
+    clean git working tree; a check of that precondition itself passes `commit=False`."""
+
+    def run(
+        verb: str,
+        project: Path,
+        answers: dict,
+        *,
+        as_json: bool = False,
+        home: Path | None = None,
+        commit: bool = True,
+    ):
+        if commit:
+            commit_all(project)
         document = tmp_path / "answers.json"
         document.write_text(json.dumps(answers), encoding="utf-8")
         argv = [
@@ -101,9 +136,12 @@ def setup_run(tmp_path: Path, plugin_root: Path):
 
 
 def tree(project: Path) -> dict[str, bytes]:
-    """Every file in a project, so two states can be compared byte for byte."""
+    """Every file in a project, so two states can be compared byte for byte. The
+    repository's own `.git/` is left out: committing a fixture or running `git status`
+    moves it, and its initial contents depend on the installed git. A check about
+    `.git/info/exclude` reads that file itself."""
     return {
         str(path.relative_to(project)): path.read_bytes()
         for path in sorted(project.rglob("*"))
-        if path.is_file()
+        if path.is_file() and path.relative_to(project).parts[0] != ".git"
     }

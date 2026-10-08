@@ -13,7 +13,7 @@
       "name": "harnex",
       "source": "./plugin",
       "description": "A reusable harness for AI coding agents, organised by the five pillars of a harness.",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "license": "MIT",
       "homepage": "https://github.com/ppalomo/harnex",
       "keywords": [

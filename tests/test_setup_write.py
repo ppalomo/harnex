@@ -18,7 +18,7 @@ from pathlib import Path
 import pytest
 
 import setup
-from conftest import tree
+from conftest import commit_all, tree
 
 SNAPSHOTS = Path(__file__).resolve().parent / "snapshots"
 DELIMITER = "===== "
@@ -117,7 +117,9 @@ def test_an_interruption_after_any_write_completes_on_the_next_run(
         leftovers = [p.name for p in project.rglob("*.tmp")]
         assert not leftovers, f"an interrupted write left {leftovers}"
 
-        code, _ = setup_run("write", project, answers)
+        # No commit in between: what the interrupted run left is the harness's own, so
+        # the clean-tree precondition (design.md D4) still holds without the person.
+        code, _ = setup_run("write", project, answers, commit=False)
         assert code == 0
         assert tree(project) == reference, (
             f"interrupting after {stop_after} write(s) did not resume to the same tree"
@@ -204,7 +206,8 @@ def test_jev_never_touches_env_or_gitignore(
     do no file I/O on `.env` or `.gitignore` at all. A `write` run with `decision_model:
     jev` writes exactly the same set of paths as a `mock` run, with the same bytes,
     except for `.harnex.yml` itself, which legitimately differs because it records the
-    choice."""
+    choice, and the repository's own `.git/info/exclude`, which gains `.env` (design.md
+    D3) — the fixtures are git repositories, since setup runs only on a clean tree."""
     mock_project = tmp_path / "mock-project"
     jev_project = tmp_path / "jev-project"
     mock_project.mkdir()
@@ -231,7 +234,10 @@ def test_jev_never_touches_env_or_gitignore(
     mock_written = written_paths(mock_said)
     jev_written = written_paths(jev_said)
     assert mock_written, "the write actually wrote something to compare"
-    assert mock_written == jev_written, "jev wrote a different set of paths than mock"
+    assert jev_written == mock_written | {setup.GIT_EXCLUDE}, (
+        "jev wrote a different set of paths than mock, beyond the `.env` exclude entry"
+    )
+    assert ".env" in (jev_project / setup.GIT_EXCLUDE).read_text(encoding="utf-8").splitlines()
 
     mock_tree = tree(mock_project)
     jev_tree = tree(jev_project)
@@ -256,6 +262,7 @@ def test_the_record_holds_a_hash_for_every_path_the_harness_owns(
 
 
 def test_the_record_is_written_last(project: Path, plugin_root: Path, answers) -> None:
+    commit_all(project)
     plan = setup.build_plan(
         project, plugin_root, setup.read_answers(json.dumps(answers), plugin_root)
     )
@@ -269,6 +276,7 @@ def test_the_script_runs_as_its_own_process(
     """The host starts this as a process with a plain interpreter, not as an import."""
     import subprocess
 
+    commit_all(project)
     document = tmp_path / "answers.json"
     document.write_text(json.dumps(answers), encoding="utf-8")
     finished = subprocess.run(
@@ -323,6 +331,7 @@ def test_the_only_writes_to_a_project_owned_path_are_creation_and_the_approved_l
     (project / "AGENTS.md").write_text("# Mine\n", encoding="utf-8")
     (project / "CLAUDE.md").write_text("# Mine\n", encoding="utf-8")
     answers["approvals"]["pointer_agents"] = True
+    commit_all(project)
 
     plan = setup.build_plan(
         project, plugin_root, setup.read_answers(json.dumps(answers), plugin_root)
