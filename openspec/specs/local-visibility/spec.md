@@ -18,7 +18,8 @@ SHALL read this value rather than infer it from what it finds on disk.
 
 - **WHEN** a project's recorded choices do not set `visibility`
 - **THEN** every harness operation treats it as `shared`, matching behaviour before this
-  value existed
+  value existed apart from the deliberate additions `shared` itself later received (the
+  `.env` exclusion and setup's clean working tree requirement, in `project-setup`)
 
 #### Scenario: Local visibility recorded
 
