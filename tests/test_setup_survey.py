@@ -456,7 +456,9 @@ def test_a_failing_git_is_a_conflict(project: Path, plugin_root: Path, answers) 
     """A `.git` git cannot read is not a tree anyone can call clean."""
     (project / ".git").write_text("gitdir: /nowhere\n", encoding="utf-8")
     conflict = _refused(_plan_as_is(project, plugin_root, answers))
-    assert "`git` failed" in conflict and "/nowhere" in conflict
+    # git's own wording of the failure varies by version (some print the gitdir, some
+    # `(null)`), so only setup's part of the message is asserted.
+    assert "`git` failed" in conflict and "make `git status` work" in conflict
 
 
 def test_a_dirty_project_path_conflicts_and_the_harness_s_own_do_not(
