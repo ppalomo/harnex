@@ -36,7 +36,8 @@ from typing import Literal
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import render_rules  # noqa: E402  (a sibling script, reached the way the host reaches it)
+import render_agents  # noqa: E402  (a sibling script, reached the way the host reaches it)
+import render_rules  # noqa: E402
 
 # --- what a harnessed project holds -------------------------------------------------
 
@@ -50,6 +51,10 @@ MANIFEST = ".harnex/manifest.json"
 SETTINGS = ".claude/settings.json"
 MCP_CONFIG = ".mcp.json"
 ENV_FILE = ".env"
+# Where the host reads a project's agents, and where every rendered agent is placed
+# (design.md D3). The directory is the project's own: only the paths in it the harness
+# renders now, or recorded having rendered, are the harness's.
+AGENTS_DIR = render_agents.AGENTS_DIR + "/"
 
 # Local visibility (docs/PLAN.md C7): nothing below is created, read or merged unless
 # `answers.visibility == "local"`. Shared visibility above is untouched by any of it.
@@ -212,6 +217,37 @@ def available_profiles(plugin_root: Path) -> list[str]:
         for path in directory.iterdir()
         if path.is_dir() or path.suffix == ".md"
     )
+
+
+def available_teams(plugin_root: Path) -> dict[str, list[dict[str, str]]]:
+    """Which specialists each profile brings, profile by profile, so the person knows what
+    choosing one imports (project-setup spec; design.md D1).
+
+    Each team is a list sorted by specialist of `{"specialist", "emoji", "phase"}`: the
+    role's name, the role's own emoji (the first code point of its `description`, D7) and
+    the phase that starts it. A profile without a team maps to an empty list. The list is
+    derived from the renderer, through the same code `_render_agents` runs, so a fragment
+    the renderer would refuse is refused here as well: the offer never lists a team the
+    plan would then stop on.
+    """
+    teams: dict[str, list[dict[str, str]]] = {}
+    try:
+        for profile in available_profiles(plugin_root):
+            agents = [
+                agent
+                for phase in render_agents.PHASES
+                for agent in render_agents.agents_for([profile], phase, plugin_root)
+            ]
+            teams[profile] = sorted(
+                (
+                    {"specialist": agent.role, "emoji": agent.emoji, "phase": agent.phase}
+                    for agent in agents
+                ),
+                key=lambda member: member["specialist"],
+            )
+    except render_agents.AgentError as error:
+        raise SetupError(str(error)) from error
+    return teams
 
 
 def available_features(plugin_root: Path) -> list[str]:
@@ -389,8 +425,13 @@ def validate_answers(answers: Answers, plugin_root: Path) -> None:
             "registered is reused, not registered again at a path. Leave `store_path` out "
             "of the answers"
         )
+    adoptable = set(HARNESS_PATHS) | set(LOCAL_HARNESS_PATHS)
+    if any(_is_agent(path) for path in answers.adopt):
+        # Only a path the chosen profiles render now is the harness's to adopt; the
+        # project's own agents beside it are never replaced.
+        adoptable |= set(_render_agents(answers, plugin_root)[0])
     for path in answers.adopt:
-        if path not in HARNESS_PATHS and path not in LOCAL_HARNESS_PATHS:
+        if path not in adoptable:
             raise SetupError(f"{path} is not a path the harness owns, so it cannot adopt it")
 
 
@@ -399,6 +440,7 @@ def choices_on_offer(plugin_root: Path) -> dict[str, object]:
     return {
         "sets": available_sets(plugin_root),
         "profiles": available_profiles(plugin_root),
+        "teams": available_teams(plugin_root),
         "features": available_features(plugin_root),
         "decision_models": list(DECISION_BACKENDS),
         "default_canary": DEFAULT_CANARY,
@@ -666,6 +708,7 @@ CONFLICT = "conflict"
 MISSING = "missing"
 REGISTER = "register"
 REUSE = "reuse"
+REMOVE = "remove"
 GIT_DIR = ".git"
 
 
@@ -690,11 +733,19 @@ class Plan:
         return [step for step in self.steps if step.data is not None]
 
     @property
+    def removals(self) -> list[Step]:
+        """The stale agents the plan deletes (design.md D3): work, like a write, with no
+        bytes of its own."""
+        return [step for step in self.steps if step.action == REMOVE]
+
+    @property
     def nothing_to_do(self) -> bool:
-        """No write, no conflict, and no registration the skill would run after the yes
-        (design.md D2): a plan that registers a store still has work in it."""
+        """No write, no removal, no conflict, and no registration the skill would run
+        after the yes (design.md D2): a plan that registers a store, or removes an agent
+        the profiles no longer render, still has work in it."""
         return (
             not self.writes
+            and not self.removals
             and not self.conflicts
             and not any(step.action == REGISTER for step in self.steps)
         )
@@ -723,7 +774,7 @@ def build_plan(
     else:
         plan = _build_shared_plan(project, plugin_root, answers, mode, repo)
     if mode == "setup":
-        _plan_clean_tree(plan, project, repo)
+        _plan_clean_tree(plan, project, repo, _own_agents(project, plugin_root, answers))
     return plan
 
 
@@ -741,14 +792,17 @@ def _build_shared_plan(
     rules = render_rules.render(
         list(answers.sets), list(answers.profiles), plugin_root / "context" / "rules"
     ).encode("utf-8")
-    desired = {RULES: rules, STATE_IGNORE: STATE_IGNORE_BODY.encode("utf-8")}
+    agents, agent_why = _render_agents(answers, plugin_root)
+    desired = {RULES: rules, STATE_IGNORE: STATE_IGNORE_BODY.encode("utf-8"), **agents}
     why = {
         RULES: "rendered from the sets the project chose",
         STATE_IGNORE: "the state directory ignores itself",
+        **agent_why,
     }
 
     _plan_project_files(plan, project, plugin_root, answers, repo, mode)
     _plan_harness_files(plan, project, answers, desired, why, recorded_paths, record is None)
+    _plan_stale_agents(plan, project, desired, recorded_paths)
     if _env_excluded(repo, answers):
         # Under `shared` the entry protects this clone alone (design.md D5).
         _plan_git_exclude(plan, project, repo, (ENV_FILE,), owner="this clone")
@@ -758,9 +812,49 @@ def _build_shared_plan(
     return plan
 
 
+def _is_agent(path: str) -> bool:
+    """Whether a project-relative path lies where the rendered agents are placed."""
+    return path.startswith(AGENTS_DIR)
+
+
+def _render_agents(answers: Answers, plugin_root: Path) -> tuple[dict[str, bytes], dict[str, str]]:
+    """Every agent the chosen profiles' teams call for, and why each one is written.
+
+    The renderer's own map, path by path, in the shape `_plan_harness_files` takes next
+    to `.harnex/rules.md` (design.md D3), so every outcome it produces — create,
+    unchanged, update, conflict, adopt — applies to an agent unchanged, and the record
+    lists it by hash like any other path. A profile without a team adds nothing. A
+    fragment the renderer refuses stops the plan the way any other refusal does.
+    """
+    desired: dict[str, bytes] = {}
+    why: dict[str, str] = {}
+    try:
+        for profile in sorted(set(answers.profiles)):
+            for path, body in render_agents.render([profile], plugin_root).items():
+                desired[path] = body
+                why[path] = f"rendered for the {profile} profile's team"
+    except render_agents.AgentError as error:
+        raise SetupError(str(error)) from error
+    return dict(sorted(desired.items())), why
+
+
+def _own_agents(project: Path, plugin_root: Path, answers: Answers) -> frozenset[str]:
+    """The rendered agent paths the clean-tree precondition exempts (design.md D3): every
+    path the chosen profiles render now, and every path under `.claude/agents/` the
+    record lists, so a stale agent awaiting removal never blocks the run that removes
+    it. Each path individually, never the directory: the project's own agents beside
+    them are the project's, and an uncommitted one counts like any other project path.
+    """
+    rendered, _ = _render_agents(answers, plugin_root)
+    record = read_manifest(project)
+    recorded: dict[str, str] = dict(record["paths"]) if record else {}  # type: ignore[arg-type]
+    return frozenset(rendered) | frozenset(path for path in recorded if _is_agent(path))
+
+
 # The paths setup itself writes or owns, under either visibility (design.md D4). An
 # uncommitted change to one of them never counts against the clean-tree precondition, so a
-# rerun before the first commit, or after an interruption, still plans.
+# rerun before the first commit, or after an interruption, still plans. The rendered
+# agents join them one path at a time (`_own_agents`), never as their directory.
 HARNESS_OWN_PATHS = (
     AGENTS,
     CLAUDE,
@@ -774,9 +868,10 @@ HARNESS_OWN_PATHS = (
 HARNESS_OWN_DIR = ".harnex/"
 
 
-def _harness_own(path: str) -> bool:
-    """Whether a project-relative path is one setup itself writes or owns."""
-    return path in HARNESS_OWN_PATHS or path.startswith(HARNESS_OWN_DIR)
+def _harness_own(path: str, agents: frozenset[str] = frozenset()) -> bool:
+    """Whether a project-relative path is one setup itself writes or owns. `agents` is
+    the run's own rendered agent paths (`_own_agents`), each counted on its own."""
+    return path in HARNESS_OWN_PATHS or path.startswith(HARNESS_OWN_DIR) or path in agents
 
 
 @dataclass(frozen=True)
@@ -834,7 +929,9 @@ def find_repository(project: Path) -> Repository:
     )
 
 
-def _plan_clean_tree(plan: Plan, project: Path, repo: Repository) -> None:
+def _plan_clean_tree(
+    plan: Plan, project: Path, repo: Repository, agents: frozenset[str] = frozenset()
+) -> None:
     """Setup's precondition, under either visibility (design.md D4): the project sits in a
     git repository whose working tree is clean apart from the harness's own paths,
     untracked files included and ignored files not. When it fails, the conflict joins the
@@ -883,7 +980,7 @@ def _plan_clean_tree(plan: Plan, project: Path, repo: Repository) -> None:
         for named in filter(None, paths):
             inside = named.startswith(repo.prefix)
             shown = named[len(repo.prefix):] if inside else named
-            if not (inside and _harness_own(shown)):
+            if not (inside and _harness_own(shown, agents)):
                 dirty.append(f"{status} {shown}")
     if not dirty:
         return
@@ -1040,16 +1137,54 @@ def _plan_harness_files(
             plan.steps.append(Step(path, "harness", ADOPT, "replaced by the harness's rendering", body))
         else:
             plan.steps.append(Step(path, "harness", CONFLICT, "present, and the harness did not write it"))
-            reason = (
-                "there is no record of what the harness generated"
-                if no_record
-                else "it was edited after the harness wrote it"
-            )
+            if no_record:
+                reason = "there is no record of what the harness generated"
+            elif path not in recorded:
+                reason = "the harness has no record of writing it"
+            else:
+                reason = "it was edited after the harness wrote it"
             plan.conflicts.append(
                 f"{path} is a path the harness owns, but {reason}. Move it aside and run "
                 "setup again, or approve its adoption and the harness will replace it with "
                 "its own rendering."
             )
+
+
+def _plan_stale_agents(
+    plan: Plan, project: Path, desired: dict[str, bytes], recorded: dict[str, str]
+) -> None:
+    """Remove every agent the record lists under `.claude/agents/` that the chosen
+    profiles no longer render (design.md D3): a `remove` step when the file still
+    matches its recorded fingerprint, a conflict when it was edited since, nothing at
+    all when it is already gone — the record simply drops it (`_plan_record` lists only
+    what is rendered now). A path the record never listed is never touched, whatever
+    sits under `.claude/agents/`: the directory is the project's own.
+
+    This is the one place the harness deletes a file. The deletion is one line of the
+    plan the person approves as a whole, before `write` runs — the `safety` set's "ask
+    before deleting" holds through that same yes, and under `update` through setup's
+    earlier yes, the same way every other update write does. Adoption is not offered
+    for a removal: the person deletes an edited stale agent by hand, or restores it.
+    """
+    for path, fingerprint in sorted(recorded.items()):
+        if not _is_agent(path) or path in desired:
+            continue
+        current = _read(project / path)
+        if current is None:
+            continue
+        if digest(current) == fingerprint:
+            plan.steps.append(
+                Step(path, "harness", REMOVE, "no longer rendered by the chosen profiles")
+            )
+            continue
+        plan.steps.append(
+            Step(path, "harness", CONFLICT, "no longer rendered, and edited since the harness wrote it")
+        )
+        plan.conflicts.append(
+            f"{path} is an agent the harness wrote, the chosen profiles no longer render "
+            "it, and it was edited after the harness wrote it. Delete it by hand and run "
+            "setup again, or restore it as the harness wrote it and the plan will remove it."
+        )
 
 
 def _plan_settings(
@@ -1610,21 +1745,29 @@ def _build_local_plan(
         list(answers.sets), list(answers.profiles), plugin_root / "context" / "rules"
     ).encode("utf-8")
     claude_local = render_template(plugin_root, CLAUDE_LOCAL, {})
+    agents, agent_why = _render_agents(answers, plugin_root)
     desired = {
         RULES: rules,
         HARNEX_IGNORE: HARNEX_IGNORE_BODY.encode("utf-8"),
         CLAUDE_LOCAL: claude_local.encode("utf-8"),
+        **agents,
     }
     why = {
         RULES: "rendered from the sets the project chose",
         HARNEX_IGNORE: "the whole of .harnex/ ignores itself under local visibility",
         CLAUDE_LOCAL: "the one import local visibility ever writes",
+        **agent_why,
     }
 
     _plan_local_entry_files(plan, project)
     _plan_local_config(plan, project, plugin_root, answers, repo, mode)
     _plan_harness_files(plan, project, answers, desired, why, recorded_paths, record is None)
-    exclude_paths = GIT_EXCLUDE_PATHS + ((ENV_FILE,) if _env_excluded(repo, answers) else ())
+    _plan_stale_agents(plan, project, desired, recorded_paths)
+    # Each rendered agent by its own path (design.md D3): excluding `.claude/agents/`
+    # would hide the project's own agents from git. A removed agent's entry is left in
+    # place, like `.env`'s: the list is the clone's, and a stale entry matches nothing.
+    exclude_paths = GIT_EXCLUDE_PATHS + tuple(agents)
+    exclude_paths += (ENV_FILE,) if _env_excluded(repo, answers) else ()
     _plan_git_exclude(plan, project, repo, exclude_paths)
     owned = _plan_settings(plan, project, plugin_root, record, target=SETTINGS_LOCAL, owner="local")
     _plan_local_mcp_notice(plan, plugin_root, answers)
@@ -1642,6 +1785,8 @@ def _plan_record(
     owned: dict[str, list[str]],
     mcp_owned: dict[str, list[str]],
 ) -> None:
+    # Only what is rendered now: an agent the profiles no longer produce drops out of the
+    # record here, whether the plan removes it or it was already gone (design.md D3).
     paths = {path: digest(body) for path, body in sorted(desired.items())}
     entries = {SETTINGS: owned} if owned["deny"] or owned["ask"] else {}
     if mcp_owned:
@@ -1683,6 +1828,11 @@ def apply_plan(plan: Plan) -> list[str]:
         raise SetupError("the plan has conflicts, so nothing was written")
     written = []
     for step in plan.steps:
+        if step.action == REMOVE:
+            # A stale agent (`_plan_stale_agents`): project-relative, planned while it
+            # still matched its fingerprint, deleted before the record that drops it.
+            (plan.project / step.path).unlink(missing_ok=True)
+            continue
         if step.data is None:
             continue
         # Every step's path is project-relative, except local visibility's one global
@@ -1719,12 +1869,19 @@ def render_plan(plan: Plan, verb: str = "plan") -> str:
     elif plan.nothing_to_do:
         lines.append("Nothing to do: this project is already set up as these answers describe.")
     elif verb == "write":
-        lines.append(f"{len(plan.writes)} path(s) to write.")
+        lines.append(f"{len(plan.writes)} path(s) to write{_removals_clause(plan)}.")
     else:
         lines.append(
-            f"{len(plan.writes)} path(s) would be written. Nothing has been written yet."
+            f"{len(plan.writes)} path(s) would be written{_removals_clause(plan)}. "
+            "Nothing has been written yet."
         )
     return "\n".join(lines) + "\n"
+
+
+def _removals_clause(plan: Plan) -> str:
+    """`, N to remove` when the plan deletes a stale agent; nothing otherwise, so the
+    closing line reads as it always has."""
+    return f", {len(plan.removals)} to remove" if plan.removals else ""
 
 
 def plan_as_json(plan: Plan) -> str:
@@ -1793,6 +1950,8 @@ def main(argv: list[str] | None = None) -> int:
             written = apply_plan(plan)
             if not args.json:
                 print("" if not written else "Written: " + ", ".join(written))
+                if plan.removals:
+                    print("Removed: " + ", ".join(step.path for step in plan.removals))
     except (SetupError, render_rules.RuleError) as error:
         print(f"setup: {error}", file=sys.stderr)
         return 1

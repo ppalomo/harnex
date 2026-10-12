@@ -38,8 +38,14 @@ rename or copy (`R` or `C`) is followed by one more NUL-ended field, the origina
 which is checked the same way. If `git rev-parse` fails, there is no repository: stop and tell the person to run `git init`
 and commit first. The harness's own paths do not count — `AGENTS.md`, `CLAUDE.md`,
 `.harnex.yml`, anything under `.harnex/`, `openspec/config.yaml`,
-`.claude/settings.json`, `.mcp.json`, `CLAUDE.local.md` and
-`.claude/settings.local.json` — so a rerun before the person commits what setup wrote, or
+`.claude/settings.json`, `.mcp.json`, `CLAUDE.local.md`,
+`.claude/settings.local.json`, and every rendered agent path
+`.claude/agents/<profile>-<specialist>.md` that the profiles the project has recorded or
+is about to choose produce, or that the generation record lists — each path on its own,
+so a stale agent awaiting removal never blocks the run that removes it, but never the
+directory `.claude/agents/` itself nor any other file in it, since the project's own
+agents there are the project's and an uncommitted one counts like any other project
+path — so a rerun before the person commits what setup wrote, or
 after an interrupted run, goes ahead. If the command lists any other path, stop, show
 those paths exactly as it listed them, and say to commit or stash them first. An
 untracked `.env` is the common case: the person can exclude it themselves (for instance
@@ -81,7 +87,13 @@ question in the conversation, never more than 4 options.
    is not theirs to add tooling to.
 3. **Rule sets** — list the sets on offer with one line each on what the set is for, and
    propose all of them. A project can drop any of them later by editing its answers file.
-4. **Profiles**, then **features** — ask only if the harness holds any.
+4. **Profiles**, then **features** — ask only if the harness holds any. When offering a
+   profile, say which specialists its team brings, read from the `teams` key of
+   `choices` — one list per profile of `specialist`, `emoji` and `phase` entries; read
+   it as JSON, since the raw output escapes the emoji — and show each as
+   `<emoji> <specialist>`: the emoji, exactly one space, the name. A profile with an
+   empty list brings none; say so. Choosing the profile imports its team, and there is
+   nothing else to answer about it.
 5. **Canary word** — only if the `canary` set was chosen. Propose the word from `choices`
    and say what it is for: every answer ends with it, and a missing word is the cheapest
    sign that the rules may have dropped out of the context.
@@ -170,6 +182,15 @@ exclude entries — `.env` among them when `jev` is chosen — the "register sto
 the global setting's line all appear in it, and the person's single yes to it covers
 them. There is no second plan.
 
+For every chosen profile with a team, the plan lists one line per rendered agent under
+`.claude/agents/`, naming the profile it comes from, with the same outcomes as any other
+harness-owned path. It may also list a `remove` line for an agent the record lists but a
+dropped profile no longer renders: that line is part of the one plan, and the person's
+single yes to the plan is what covers that deletion — ask for no separate yes, and remove
+nothing the plan did not list. A `conflict` on an agent path is resolved like any other:
+adoption, only for a path the chosen profiles render; an edited stale agent is deleted by
+hand, or restored as the harness wrote it so the plan can remove it.
+
 ## 5. Approvals are the person's, one by one
 
 The approvals in the answers document start `false` and an empty list. Set one only after
@@ -213,6 +234,8 @@ The script surveys again before it writes, so an approval given against a plan t
 since gone stale writes nothing and says why. Report the paths it wrote, and every side
 effect beyond them, by name:
 
+- The agents written under `.claude/agents/`, each by its path, and — when the script
+  printed a `Removed:` line — the agents removed, each by its path.
 - The store registration — its id and its path — if you ran it; if the plan showed
   "reuse store `<id>`" instead, say the store was reused, not registered.
 - `.env` added to `.git/info/exclude`, if `jev` was chosen and the plan's exclude step
@@ -248,6 +271,8 @@ Under `local` visibility there is no `AGENTS.md` to point at — say instead tha
 - Choose where the store lives: the path is the person's answer, never a default they
   did not see.
 - Show a second plan to approve what the first one already showed.
+- Render or edit an agent by hand, or remove an agent the plan did not list. The script
+  renders and removes; a `remove` line is approved with the plan it sits in.
 - Re-render `.harnex.yml`, `.harnex/config.yml`, `AGENTS.md`, `CLAUDE.md`,
   `CLAUDE.local.md` or the OpenSpec config. They belong to the project (or, under local
   visibility, to the person alone): setup creates them when they are absent and never

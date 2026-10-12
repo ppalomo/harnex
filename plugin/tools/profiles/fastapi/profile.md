@@ -25,3 +25,10 @@ skips is treated as no evidence at all, not as a passing check.
 
 FastAPI, SQLAlchemy, Alembic, pytest. Dependency and virtual-environment management is
 whatever the project's own lockfile already names — this profile does not choose one.
+
+## Team
+
+This profile is a directory, and each file beside this one is what this stack adds to one
+specialist: `security-reviewer.md`, `migration-reviewer.md` and `api-designer.md`. A
+project that chooses `fastapi` gets those three agents, each rendered from the role of the
+same name with the fragment appended, and nothing a fragment says alters the role.

@@ -6,13 +6,24 @@ that is already what the harness would write is recognised as current, whatever 
 record says about it.
 """
 
+import io
 import json
+from contextlib import redirect_stdout
 from pathlib import Path
 
 import pytest
 
+import render_agents
 import setup
-from conftest import commit_all, git, tree
+from conftest import (
+    FLAT_PROFILE,
+    TEAM_PROFILE,
+    TEAM_SPECIALISTS,
+    commit_all,
+    git,
+    team_agent_paths,
+    tree,
+)
 
 
 def _plan(project: Path, plugin_root: Path, answers: dict) -> setup.Plan:
@@ -498,3 +509,338 @@ def test_update_mode_does_not_check_the_tree(project: Path, plugin_root: Path, a
     (project / "README.md").write_text("mine\n", encoding="utf-8")
     plan = _update_plan(project, plugin_root, answers)
     assert all(step.path != setup.GIT_DIR for step in plan.steps)
+
+
+# --- the chosen profiles' agents (agent-teams, design.md D3) -------------------------
+
+
+def _agent_steps(plan: setup.Plan) -> list[setup.Step]:
+    return [step for step in plan.steps if step.path.startswith(setup.AGENTS_DIR)]
+
+
+def test_a_profile_with_a_team_plans_one_line_per_agent_naming_the_profile(
+    project: Path, team_plugin_root: Path, answers
+) -> None:
+    answers["profiles"] = [TEAM_PROFILE]
+    plan = _plan(project, team_plugin_root, answers)
+    rendered = render_agents.render([TEAM_PROFILE], team_plugin_root)
+    steps = _agent_steps(plan)
+    assert [step.path for step in steps] == team_agent_paths() == list(rendered)
+    for step in steps:
+        assert (step.owner, step.action) == ("harness", setup.CREATE)
+        assert TEAM_PROFILE in step.detail, "the line says which profile's team it is"
+        assert step.data == rendered[step.path], "the renderer's own bytes, untouched"
+    assert plan.steps[-1].path == setup.MANIFEST, "the record is still written last"
+    assert not plan.conflicts
+
+
+def test_a_flat_profile_plans_no_agent(project: Path, team_plugin_root: Path, answers) -> None:
+    answers["profiles"] = [FLAT_PROFILE]
+    plan = _plan(project, team_plugin_root, answers)
+    assert _agent_steps(plan) == []
+    assert setup.AGENTS_DIR not in setup.render_plan(plan)
+
+
+@pytest.mark.parametrize("mode", ["setup", "update"])
+def test_an_agent_follows_the_same_outcomes_as_the_rules(
+    project: Path, team_plugin_root: Path, answers, setup_run, mode: str
+) -> None:
+    """By content and by the record, never by presence: unchanged while it is what the
+    harness writes, an update when the harness's own rendering moved, a conflict when it
+    was edited after the harness wrote it — exactly as `.harnex/rules.md`, in either mode."""
+    answers["profiles"] = [TEAM_PROFILE]
+    code, _ = setup_run("write", project, answers, plugin_root=team_plugin_root)
+    assert code == 0
+    first, second, third = team_agent_paths()
+
+    def plan() -> setup.Plan:
+        commit_all(project)
+        return setup.build_plan(
+            project,
+            team_plugin_root,
+            setup.read_answers(json.dumps(answers), team_plugin_root),
+            mode=mode,
+        )
+
+    current = plan()
+    assert all(_step(current, path).action == setup.UNCHANGED for path in (first, second, third))
+    assert not current.conflicts
+
+    specialist = first.removeprefix(f"{setup.AGENTS_DIR}{TEAM_PROFILE}-").removesuffix(".md")
+    fragment = team_plugin_root / "tools" / "profiles" / TEAM_PROFILE / f"{specialist}.md"
+    fragment.write_text("The fragment changed.\n", encoding="utf-8")
+    moved = plan()
+    assert _step(moved, first).action == setup.UPDATE
+    assert _step(moved, first).data == render_agents.render([TEAM_PROFILE], team_plugin_root)[first]
+    assert _step(moved, second).action == setup.UNCHANGED
+
+    (project / second).write_text("edited by hand\n", encoding="utf-8")
+    edited = plan()
+    assert _step(edited, second).action == setup.CONFLICT
+    assert any(second in c and "edited after the harness wrote it" in c for c in edited.conflicts)
+    assert _step(edited, third).action == setup.UNCHANGED
+
+
+def test_a_hand_written_agent_the_harness_never_recorded_says_so(
+    project: Path, team_plugin_root: Path, answers, setup_run
+) -> None:
+    """The conflict sentence tells the two cases apart: a path the record lists was
+    edited after the harness wrote it; a path it never lists — written by hand, or
+    removed by the harness and written again since — is one the harness has no record
+    of writing. Both are conflicts; only the second sentence is true of the second."""
+    answers["profiles"] = []
+    code, _ = setup_run("write", project, answers, plugin_root=team_plugin_root)
+    assert code == 0
+    first, _, _ = team_agent_paths()
+    (project / first).parent.mkdir(parents=True, exist_ok=True)
+    (project / first).write_text("---\nname: mine\ndescription: mine\n---\n\nMine.\n", encoding="utf-8")
+    commit_all(project)
+
+    answers["profiles"] = [TEAM_PROFILE]
+    plan = _plan(project, team_plugin_root, answers)
+    assert _step(plan, first).action == setup.CONFLICT
+    conflict = next(c for c in plan.conflicts if first in c)
+    assert "has no record of writing it" in conflict
+    assert "edited after the harness wrote it" not in conflict
+
+
+def test_a_fragment_the_renderer_refuses_stops_setup_as_its_own_refusal(
+    project: Path, team_plugin_root: Path, answers, setup_run
+) -> None:
+    """A stray fragment is an ordinary `SetupError`: shown like any other refusal, no
+    traceback, nothing planned and nothing written."""
+    stray = team_plugin_root / "tools" / "profiles" / TEAM_PROFILE / "nobody.md"
+    stray.write_text("For a role the harness does not hold.\n", encoding="utf-8")
+    answers["profiles"] = [TEAM_PROFILE]
+    with pytest.raises(setup.SetupError, match="nobody.md"):
+        _plan(project, team_plugin_root, answers)
+    code, said = setup_run("write", project, answers, plugin_root=team_plugin_root)
+    assert code == 1
+    assert said.startswith("setup: ") and "names no role" in said
+    assert "Traceback" not in said
+    assert not (project / ".claude" / "agents").exists()
+
+
+# --- the clean-tree precondition and the rendered agents (design.md D3) ----------------
+
+
+def test_a_shared_rerun_with_rendered_agents_uncommitted_plans_nothing_to_do(
+    project: Path, team_plugin_root: Path, answers, setup_run
+) -> None:
+    answers["profiles"] = [TEAM_PROFILE]
+    code, _ = setup_run("write", project, answers, plugin_root=team_plugin_root)
+    assert code == 0
+    status = git(project, "status", "--porcelain", "--untracked-files=all").stdout
+    assert all(path in status for path in team_agent_paths()), "the agents are uncommitted"
+
+    plan = _plan_as_is(project, team_plugin_root, answers)
+    assert not plan.conflicts
+    assert all(step.path != setup.GIT_DIR for step in plan.steps)
+    assert plan.nothing_to_do
+    code, said = setup_run("write", project, answers, commit=False, plugin_root=team_plugin_root)
+    assert code == 0 and "Nothing to do" in said
+
+
+@pytest.mark.parametrize("profiles", [[], [TEAM_PROFILE]])
+def test_an_untracked_project_agent_is_a_conflict_like_any_other_path(
+    project: Path, team_plugin_root: Path, answers, profiles: list[str]
+) -> None:
+    """`.claude/agents/` itself is never exempt: an agent the project wrote, with a team
+    beside it or with no team at all, counts against the tree like any other path."""
+    answers["profiles"] = profiles
+    commit_all(project)
+    own = project / ".claude" / "agents" / "own.md"
+    own.parent.mkdir(parents=True)
+    own.write_text("# Mine\n", encoding="utf-8")
+    conflict = _refused(_plan_as_is(project, team_plugin_root, answers))
+    assert [line.split()[-1] for line in conflict.splitlines()[1:]] == [".claude/agents/own.md"]
+
+
+def test_a_recorded_agent_the_profiles_no_longer_render_does_not_count_against_the_tree(
+    project: Path, team_plugin_root: Path, answers, setup_run
+) -> None:
+    """The profile is dropped before its agents were committed: the record still lists
+    them, so they are the harness's own and the precondition holds for the run that is
+    to remove them. (Only the precondition is checked here; their removal is planned by
+    the next task.)"""
+    answers["profiles"] = [TEAM_PROFILE]
+    code, _ = setup_run("write", project, answers, plugin_root=team_plugin_root)
+    assert code == 0
+    record = json.loads((project / setup.MANIFEST).read_text(encoding="utf-8"))
+    assert set(team_agent_paths()) <= set(record["paths"])
+
+    answers["profiles"] = []
+    plan = _plan_as_is(project, team_plugin_root, answers)
+    assert all(step.path != setup.GIT_DIR for step in plan.steps)
+    assert not plan.conflicts
+
+
+# --- removal of an agent the profiles no longer render (design.md D3) ------------------
+
+
+def _record_of(project: Path) -> dict:
+    return json.loads((project / setup.MANIFEST).read_text(encoding="utf-8"))
+
+
+@pytest.mark.parametrize("mode", ["setup", "update"])
+def test_a_dropped_profile_plans_the_removal_of_its_agents(
+    project: Path, team_plugin_root: Path, answers, setup_run, mode: str
+) -> None:
+    """Each agent the record lists and the choices no longer produce, still as the
+    harness wrote it, is one `remove` line of the plan — the one deletion the harness
+    ever plans, approved with the rest of the plan — and the record written last no
+    longer lists it. In either mode: `update` reaches it through the same plan."""
+    answers["profiles"] = [TEAM_PROFILE]
+    code, _ = setup_run("write", project, answers, plugin_root=team_plugin_root)
+    assert code == 0
+    assert set(team_agent_paths()) <= set(_record_of(project)["paths"])
+
+    answers["profiles"] = []
+    commit_all(project)
+    plan = setup.build_plan(
+        project,
+        team_plugin_root,
+        setup.read_answers(json.dumps(answers), team_plugin_root),
+        mode=mode,
+    )
+    assert not plan.conflicts
+    assert [step.path for step in plan.removals] == team_agent_paths()
+    for step in plan.removals:
+        assert (step.owner, step.action, step.data) == ("harness", setup.REMOVE, None)
+        assert "no longer rendered" in step.detail
+    assert not plan.nothing_to_do, "a removal is work to do"
+    record = _step(plan, setup.MANIFEST)
+    assert record.action == setup.UPDATE and record.data is not None
+    assert not any(path in record.data.decode("utf-8") for path in team_agent_paths())
+    assert plan.steps[-1].path == setup.MANIFEST, "the record is still written last"
+    said = setup.render_plan(plan)
+    assert all(f"remove    {path}" in said for path in team_agent_paths())
+    assert "3 to remove" in said
+
+
+def test_an_edited_stale_agent_is_a_conflict_and_adoption_is_not_offered(
+    project: Path, team_plugin_root: Path, answers, setup_run
+) -> None:
+    """Only an agent that is still what the harness wrote is the harness's to delete.
+    One edited since is reported, named, and left where it is — the person deletes it by
+    hand or restores it; the others, untouched, are still planned for removal."""
+    answers["profiles"] = [TEAM_PROFILE]
+    code, _ = setup_run("write", project, answers, plugin_root=team_plugin_root)
+    assert code == 0
+    first, *rest = team_agent_paths()
+    (project / first).write_text("edited by hand\n", encoding="utf-8")
+
+    answers["profiles"] = []
+    plan = _plan(project, team_plugin_root, answers)
+    assert _step(plan, first).action == setup.CONFLICT
+    assert [step.path for step in plan.removals] == rest
+    conflict = next(c for c in plan.conflicts if first in c)
+    assert "edited after the harness wrote it" in conflict
+    assert "adopt" not in conflict, "a removal is never adopted"
+    assert "Delete it by hand" in conflict
+
+    answers["approvals"]["adopt"] = [first]
+    with pytest.raises(setup.SetupError, match="cannot adopt"):
+        setup.read_answers(json.dumps(answers), team_plugin_root)
+
+
+def test_a_stale_agent_already_deleted_by_hand_drops_silently_from_the_record(
+    project: Path, team_plugin_root: Path, answers, setup_run
+) -> None:
+    answers["profiles"] = [TEAM_PROFILE]
+    code, _ = setup_run("write", project, answers, plugin_root=team_plugin_root)
+    assert code == 0
+    first, *rest = team_agent_paths()
+    (project / first).unlink()
+
+    answers["profiles"] = []
+    plan = _plan(project, team_plugin_root, answers)
+    assert not plan.conflicts
+    assert all(step.path != first for step in plan.steps), "nothing to say about it"
+    assert [step.path for step in plan.removals] == rest
+    assert first not in _step(plan, setup.MANIFEST).data.decode("utf-8")
+
+    code, _ = setup_run("write", project, answers, plugin_root=team_plugin_root)
+    assert code == 0
+    assert not any(path in _record_of(project)["paths"] for path in team_agent_paths())
+
+
+def test_an_agent_the_record_never_listed_is_never_removed(
+    project: Path, team_plugin_root: Path, answers
+) -> None:
+    """Whatever sits under `.claude/agents/`, with no record of the harness having
+    written it there is nothing for the harness to remove — even at a path a profile
+    would render."""
+    for name in ("own.md", f"{TEAM_PROFILE}-reviewer.md"):
+        path = project / ".claude" / "agents" / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# Mine\n", encoding="utf-8")
+    plan = _plan(project, team_plugin_root, answers)
+    assert not plan.conflicts and not plan.removals
+    assert not any(step.path.startswith(setup.AGENTS_DIR) for step in plan.steps)
+
+
+def test_a_removal_alone_is_work_to_do(project: Path) -> None:
+    plan = setup.Plan(project=project)
+    assert plan.nothing_to_do
+    removal = setup.Step(team_agent_paths()[0], "harness", setup.REMOVE, "no longer rendered")
+    plan.steps.append(removal)
+    assert not plan.writes and not plan.conflicts
+    assert plan.removals == [removal]
+    assert not plan.nothing_to_do
+
+
+# --- what the offer says a profile brings (project-setup spec; design.md D1, D7) -------
+
+
+def _offer_member(plugin_root: Path, specialist: str) -> dict[str, str]:
+    """What the offer must say about one specialist, read from the role itself: its emoji
+    is the role description's first code point (design.md D7), its phase the role's."""
+    role = render_agents.read_role(render_agents.roles_dir(plugin_root) / f"{specialist}.md")
+    return {"specialist": specialist, "emoji": role.description[0], "phase": role.phase}
+
+
+def test_the_offer_says_which_specialists_each_profile_brings(team_plugin_root: Path) -> None:
+    on_offer = setup.choices_on_offer(team_plugin_root)
+    assert all(isinstance(name, str) for name in on_offer["profiles"]), "still a flat list"
+    assert {TEAM_PROFILE, FLAT_PROFILE} <= set(on_offer["profiles"])
+    teams = on_offer["teams"]
+    assert set(teams) == set(on_offer["profiles"]), "every profile on offer has a team entry"
+    assert teams[TEAM_PROFILE] == [
+        _offer_member(team_plugin_root, specialist) for specialist in sorted(TEAM_SPECIALISTS)
+    ], "the three specialists, sorted by name, each with its emoji and phase"
+    assert teams[FLAT_PROFILE] == []
+    for member in teams[TEAM_PROFILE]:
+        assert len(member["emoji"]) == 1, "one code point, as the role's description opens"
+        assert member["phase"] in render_agents.FRAGMENT_PHASES
+
+
+def test_the_shipped_offer_maps_every_profile_to_its_team(plugin_root: Path) -> None:
+    on_offer = setup.choices_on_offer(plugin_root)
+    assert set(on_offer["teams"]) == set(on_offer["profiles"])
+    profiles = plugin_root / "tools" / "profiles"
+    for profile, team in on_offer["teams"].items():
+        assert isinstance(team, list)
+        if not (profiles / profile).is_dir():
+            assert team == [], f"{profile} is a single-file profile and brings nobody"
+
+
+def test_a_fragment_the_renderer_refuses_is_refused_by_the_offer_too(
+    team_plugin_root: Path,
+) -> None:
+    """The offer must not list a team the plan would then refuse: a stray fragment is the
+    same `SetupError` here as it is when planning."""
+    stray = team_plugin_root / "tools" / "profiles" / TEAM_PROFILE / "nobody.md"
+    stray.write_text("For a role the harness does not hold.\n", encoding="utf-8")
+    with pytest.raises(setup.SetupError, match="nobody.md"):
+        setup.choices_on_offer(team_plugin_root)
+
+
+def test_the_choices_verb_prints_the_teams_with_the_rest(team_plugin_root: Path) -> None:
+    out = io.StringIO()
+    with redirect_stdout(out):
+        code = setup.main(["choices", "--plugin-root", str(team_plugin_root)])
+    assert code == 0
+    printed = json.loads(out.getvalue())
+    assert printed["teams"] == setup.choices_on_offer(team_plugin_root)["teams"]
+    assert printed["teams"][TEAM_PROFILE][0]["specialist"] == sorted(TEAM_SPECIALISTS)[0]

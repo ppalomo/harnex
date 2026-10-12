@@ -42,6 +42,7 @@ sys.path.insert(0, str(REPO_ROOT / "plugin" / "feedback" / "canary"))
 import copy  # noqa: E402
 import io  # noqa: E402
 import json  # noqa: E402
+import shutil  # noqa: E402
 import subprocess  # noqa: E402
 from contextlib import redirect_stderr, redirect_stdout  # noqa: E402
 
@@ -99,7 +100,10 @@ def setup_run(tmp_path: Path, plugin_root: Path):
     """Run the script the way its command line does, and return what it said.
 
     By default the project is committed first (`commit_all`), since setup only plans on a
-    clean git working tree; a check of that precondition itself passes `commit=False`."""
+    clean git working tree; a check of that precondition itself passes `commit=False`.
+    The shipped plugin is the harness unless `plugin_root` names another — a check about
+    a profile with a team passes `team_plugin_root`, since the shipped one holds none."""
+    shipped = plugin_root
 
     def run(
         verb: str,
@@ -109,6 +113,7 @@ def setup_run(tmp_path: Path, plugin_root: Path):
         as_json: bool = False,
         home: Path | None = None,
         commit: bool = True,
+        plugin_root: Path | None = None,
     ):
         if commit:
             commit_all(project)
@@ -121,7 +126,7 @@ def setup_run(tmp_path: Path, plugin_root: Path):
             "--project",
             str(project),
             "--plugin-root",
-            str(plugin_root),
+            str(plugin_root or shipped),
         ]
         if as_json:
             argv.append("--json")
@@ -145,3 +150,43 @@ def tree(project: Path) -> dict[str, bytes]:
         for path in sorted(project.rglob("*"))
         if path.is_file() and path.relative_to(project).parts[0] != ".git"
     }
+
+
+# --- a profile with a team (agent-teams, design.md D1 and D3) -----------------------
+
+# The fixture team: one profile directory with three fragments, each for a real role that
+# takes one (a propose-phase role and two review-phase roles), and one single-file profile
+# with no team. Neither names a stack: they stand for whatever profiles the harness ships.
+TEAM_PROFILE = "alpha"
+TEAM_SPECIALISTS = ("api-designer", "reviewer", "security-reviewer")
+FLAT_PROFILE = "beta"
+
+
+def team_agent_paths(profile: str = TEAM_PROFILE) -> list[str]:
+    """Where the fixture team's agents land, in the order the plan lists them."""
+    return [
+        f"{setup_script.AGENTS_DIR}{profile}-{specialist}.md"
+        for specialist in sorted(TEAM_SPECIALISTS)
+    ]
+
+
+@pytest.fixture
+def team_plugin_root(tmp_path: Path, plugin_root: Path) -> Path:
+    """The shipped plugin, copied under `tmp_path` and given the two fixture profiles.
+
+    A copy, not an override: setup finds the roles and the profiles where it always
+    does, so what it writes here is exactly what it would write for a shipped team."""
+    root = tmp_path / "team-plugin"
+    shutil.copytree(plugin_root, root, ignore=shutil.ignore_patterns("__pycache__"))
+    profiles = root / "tools" / "profiles"
+    team = profiles / TEAM_PROFILE
+    team.mkdir()
+    (team / "profile.md").write_text(f"# {TEAM_PROFILE}\n\nA stack with a team.\n", encoding="utf-8")
+    for specialist in TEAM_SPECIALISTS:
+        (team / f"{specialist}.md").write_text(
+            f"On {TEAM_PROFILE}, as {specialist}.\n", encoding="utf-8"
+        )
+    (profiles / f"{FLAT_PROFILE}.md").write_text(
+        f"# {FLAT_PROFILE}\n\nA stack with no team.\n", encoding="utf-8"
+    )
+    return root

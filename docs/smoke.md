@@ -855,3 +855,222 @@ single yes/no ask `ship` always asked, unchanged.
   before this change, with nothing about a version in it, and its final report says
   nothing about a tag or a bumped version — proving the no-manifest project is left
   exactly as it would have been without this change.
+
+---
+
+## agent-teams (C10)
+
+**Delivers:** a profile's team — `rails`, `fastapi` and `flutter` each carry three
+specialists — rendered by `/harnex:setup` into one Claude Code agent per specialist under
+`.claude/agents/`, named `<profile>-<specialist>` and owned by the harness by hash;
+`/harnex:review` starting every stack reviewer after the core reviewer and showing each
+review under its own `<emoji> <name>` label; `/harnex:propose` consulting the stack's
+advisors before `design.md` is written; `/harnex:update` refreshing or removing the agents,
+asking nothing; and a profile dropped from `.harnex.yml` taking its agents with it.
+Requires a fresh Claude Code session after installing this version of the plugin, for the
+same reason `C2` does.
+
+**Verified against:** every deterministic step (`render_agents.py`'s `render`, `list` and
+`sync --check`, `setup.py`'s agent plan, removal and local exclusion) against
+`uv run --with pytest pytest`. The live walk below is this change's own "try it": record
+the versions it passes on here (written against Claude Code 2.1.287, OpenSpec 1.11.0,
+Python 3.13 through `uv`).
+
+**Steps**
+
+1. Install this version of the plugin, from a fresh session, and confirm what it
+   contributes:
+   ```bash
+   claude plugin marketplace add ./
+   claude plugin install harnex@harnex
+   claude plugin details harnex
+   ```
+2. Make a scratch project, committed, with the `openspec` CLI on its `PATH` (step 7 needs
+   it), and open a session in it:
+   ```bash
+   mkdir -p /tmp/harnex-teams && cd /tmp/harnex-teams && git init -q -b main
+   git config user.email t@t.com && git config user.name t
+   printf '# teams\n' > README.md && git add -A && git commit -qm "first commit"
+   openspec init -q 2>/dev/null || true
+   git add -A && git commit -qm "openspec" 2>/dev/null || true
+   claude
+   ```
+   Run `/harnex:setup`. Answer: accept the directory name, `shared`, the `git`, `sdd` and
+   `code` sets, **`rails`** among the profiles, `mock`, and any check command. **Read the
+   profile offer and the plan before you say yes.** Then say yes.
+3. Read what landed:
+   ```bash
+   ls .claude/agents
+   grep -o '"\.claude/agents/[^"]*"' .harnex/manifest.json
+   git status --short --untracked-files=all
+   ```
+4. Read one rendered agent against its role and its fragment — the role from your
+   checkout's `plugin/orchestration/roles/`, the fragment from
+   `plugin/tools/profiles/rails/`:
+   ```bash
+   H=~/Developer/harnex/plugin     # your checkout
+   head -5 .claude/agents/rails-security-reviewer.md
+   grep -n '^## ' .claude/agents/rails-security-reviewer.md
+   diff <(sed -n '/^## Who you are$/,/^## /p' .claude/agents/rails-security-reviewer.md | sed '$d') \
+        <(sed -n '/^## Who you are$/,/^## /p' $H/orchestration/roles/security-reviewer.md | sed '$d')
+   diff <(sed '1,/^## For this stack: rails$/d' .claude/agents/rails-security-reviewer.md | tail -n +2) \
+        $H/tools/profiles/rails/security-reviewer.md
+   ```
+   The same two `diff`s hold for `rails-migration-reviewer` and `rails-api-designer`
+   against their own role and fragment.
+5. Run `/harnex:setup` again in the same session, before committing anything, and read
+   what it says. Then commit what setup wrote:
+   ```bash
+   git add -A && git commit -qm "harnessed"
+   ```
+6. A small diff on a branch — a migration and a controller, so each stack reviewer has
+   something of its own to read — then `/harnex:review` in the session. A diff is the only
+   precondition `review` has; no change directory is needed yet:
+   ```bash
+   git checkout -qb a-change
+   mkdir -p db/migrate app/controllers
+   cat > db/migrate/20260101000000_add_notes.rb <<'RB'
+   class AddNotes < ActiveRecord::Migration[7.1]
+     def change
+       create_table(:notes) { |t| t.string :body }
+       add_index :notes, :body
+     end
+   end
+   RB
+   cat > app/controllers/notes_controller.rb <<'RB'
+   class NotesController < ApplicationController
+     def index
+       render json: Note.where("body LIKE '%#{params[:q]}%'")
+     end
+   end
+   RB
+   ```
+   Run `/harnex:review`. Read the three reviews, in the order they are shown.
+7. In the same session, `/harnex:propose` for a small idea that implies an API, e.g.
+   *"an endpoint that lists notes, paginated"*. Watch the order things happen in: the
+   advice line, `proposal.md`, then the advisor, then `design.md`, then the scope check,
+   then the verifier. Then:
+   ```bash
+   grep -n 'rails-api-designer' openspec/changes/*/design.md
+   git add -A && git commit -qm "a diff and its proposal"
+   ```
+8. Drop `rails` from the recorded choices by hand, commit, and run `/harnex:update` in the
+   session (or, from your checkout, `uv run plugin/scripts/update.py --project
+   /tmp/harnex-teams`, which is what the command runs):
+   ```bash
+   sed -i '' '/^  - rails$/d' .harnex.yml
+   git commit -qam "drop the rails profile"
+   ```
+   After the update:
+   ```bash
+   ls -A .claude/agents 2>&1
+   grep -c 'agents/' .harnex/manifest.json
+   git status --short
+   git add -A && git commit -qm "agents removed"
+   ```
+9. Put `rails` back, write a file by hand at a path the profile renders, and commit both —
+   a clean tree, so the refusal is about the file, not the tree. Then run `/harnex:setup`
+   with the same answers, read the plan, and when the conflict is reported, approve
+   adopting that one path after the difference has been shown to you:
+   ```bash
+   python3 - <<'PY'
+   import pathlib
+   p = pathlib.Path(".harnex.yml")
+   p.write_text(p.read_text().replace("profiles:\n", "profiles:\n  - rails\n", 1))
+   PY
+   printf -- '---\nname: rails-security-reviewer\ndescription: mine\n---\n\nMy own reviewer.\n' \
+     > .claude/agents/rails-security-reviewer.md
+   git add -A && git commit -qm "rails back, one agent written by hand"
+   ```
+   Afterwards:
+   ```bash
+   git status --short
+   head -3 .claude/agents/rails-security-reviewer.md
+   ```
+10. Local visibility, briefly, from the script with a scratch home directory as `C7` does:
+    ```bash
+    mkdir -p /tmp/harnex-teams-local && cd /tmp/harnex-teams-local && git init -q
+    git config user.email t@t.com && git config user.name t
+    printf '# local\n' > README.md && git add -A && git commit -qm "first commit"
+    cd ~/Developer/harnex
+    cat > /tmp/harnex-teams-local.json <<'JSON'
+    {"project_name": "teams-local", "profiles": ["rails"], "sets": ["git", "sdd"], "features": [],
+     "canary": "", "decision_model": "mock", "check_command": "make check",
+     "approvals": {"pointer_agents": false, "pointer_claude": false, "adopt": []},
+     "visibility": "local", "tools": ["claude"], "store_id": "harnex-teams-local",
+     "store_path": "/tmp/harnex-teams-store"}
+    JSON
+    mkdir -p /tmp/harnex-teams-home
+    uv run plugin/scripts/setup.py plan --answers /tmp/harnex-teams-local.json \
+      --project /tmp/harnex-teams-local --home /tmp/harnex-teams-home
+    openspec store setup harnex-teams-local --path /tmp/harnex-teams-store --json
+    uv run plugin/scripts/setup.py write --answers /tmp/harnex-teams-local.json \
+      --project /tmp/harnex-teams-local --home /tmp/harnex-teams-home
+    cat /tmp/harnex-teams-local/.git/info/exclude
+    git -C /tmp/harnex-teams-local status --porcelain
+    ```
+11. Run the repository's own checks, and the adapter correspondence on its own:
+    ```bash
+    uv run --with pytest pytest -q -rs
+    uv run plugin/scripts/render_agents.py sync --check; echo "exit $?"
+    ```
+12. Tidy up:
+    `rm -rf /tmp/harnex-teams /tmp/harnex-teams-local /tmp/harnex-teams-store /tmp/harnex-teams-home /tmp/harnex-teams-local.json`.
+
+**Expect**
+
+- Step 1: harnex lists **5 agents** — `builder`, `reviewer`, `verifier` and the two new
+  core ones, `debugger` and `test-engineer`. No stack specialist is among them: those are
+  rendered into a project, never shipped.
+- Step 2: the profile question shows `rails` with its team as three `<emoji> <specialist>`
+  entries — `🔌 api-designer`, `🧮 migration-reviewer`, `🔐 security-reviewer`, the emoji,
+  one space, the name — `fastapi` and `flutter` each with their own three, and `react`
+  with none. The plan has three lines under `.claude/agents/`: `rails-api-designer.md`,
+  `rails-migration-reviewer.md` and `rails-security-reviewer.md`, each `create`, owner
+  `harness`, detail `rendered for the rails profile's team`. After the yes, the report
+  names the three agents written, by path.
+- Step 3: `ls` shows exactly the three files; the manifest lists the three paths, each by
+  `sha256` like the rules file; `git status` shows them untracked beside the rest of what
+  setup wrote — none is excluded or ignored under `shared`.
+- Step 4: the frontmatter is exactly `name`, `description` and `tools` — no `phase`;
+  `name` is `rails-security-reviewer`; the `description` opens with `🔐` and exactly one
+  space and ends with `— stack: rails`; `tools` is `Read, Grep, Glob`. The heading list
+  has `## Who you are` as the first `##` after the title and `## For this stack: rails`
+  as the last. **Both `diff`s print nothing:** the persona is the role's own, byte for
+  byte, and what follows the stack heading is the fragment, byte for byte.
+- Step 5: the rerun goes ahead, not refused: the three uncommitted agents are the
+  harness's own, each by its path, and do not count against the clean tree. It says
+  "Nothing to do: this project is already set up as these answers describe." and not a
+  byte changes, the manifest included.
+- Step 6: three reviews, in this order, none merged: the core reviewer's first, then one
+  under the heading `🧮 rails-migration-reviewer`, then one under `🔐
+  rails-security-reviewer` — each heading the emoji, one space, the `name`, nothing else.
+  The migration reviewer has something to say about `add_index`; the security reviewer
+  about `params[:q]` interpolated into `where`. A finding both make is shown twice: two
+  readers found it. `review` wrote nothing and asked nothing about a model.
+- Step 7: `🔌 rails-api-designer` is started exactly once — after `proposal.md` exists
+  and before `design.md` is written, never earlier and never again. `design.md` names it
+  by that same line wherever a decision came from its brief, so `grep` finds it. The
+  verifier still runs once, at the end, after every artifact exists; `openspec/changes/`
+  holds the change and nothing was written outside it.
+- Step 8: update asks nothing. Its plan shows three `remove` lines, detail `no longer
+  rendered by the chosen profiles`; the report says `Written:` with
+  `.harnex/manifest.json` and `Removed:` with the three paths. `ls` lists no `rails-*`
+  file, the `grep -c` prints `0`, and `git status` shows the three deletions and the
+  manifest — nothing else moved, `.harnex.yml` least of all.
+- Step 9: the plan shows `rails-api-designer.md` and `rails-migration-reviewer.md` as
+  `create` again and `rails-security-reviewer.md` as `conflict`, `present, and the
+  harness did not write it`; the conflicts list names that path, says it is one the
+  harness owns, and offers moving it aside or adopting it. Nothing is written while it
+  stands: `git status --short` prints nothing. After the adoption the line reads `adopt`,
+  `replaced by the harness's rendering`; `git status` shows that one file modified and
+  the other two created; `head -3` shows the rendered frontmatter — `name:
+  rails-security-reviewer`, the `🔐` description — not `mine`.
+- Step 10: the plan lists the three agents as `create` and the exclude step names each
+  agent path individually. `.git/info/exclude` holds `CLAUDE.local.md`,
+  `.claude/settings.local.json` and the three `.claude/agents/rails-*.md` lines — never
+  `.claude/agents/` or `.claude/agents/*`, so a project's own agent beside them would stay
+  visible to git. `git status --porcelain` prints nothing.
+- Step 11: every check passes. `sync --check` prints nothing and exits 0: every adapter
+  under `plugin/agents/` is what its role renders, so the five core agents and the
+  rendered specialists carry the same persona text as their roles.

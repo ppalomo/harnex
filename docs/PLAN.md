@@ -115,20 +115,46 @@ and checked (pillar 5).
 
 ## 4. Roles
 
-Four roles in v0.1, from the role study. Prompts are tool-agnostic and follow one
-skeleton (see the study). The orchestrator is you plus the commands.
+Eleven roles since `C10`, grown from the role study's four: ten prompts under
+`orchestration/roles/`, plus the `architect`, which is the main session itself and has no
+prompt. The four original players — `architect`, `builder`, `verifier`, `reviewer` — are
+joined in the **core team** (six roles, five of them prompts) by `test-engineer` and
+`debugger`, shipped as plugin agents like the three before them but,
+in this version, started by the person by name: no skill calls either, and
+`test-engineer` is held by instruction only. Five **stack specialists** never ship as
+plugin agents: each is rendered into a project from a profile's team (§5, §6), read-only
+by its `tools`, and started by `review` or `propose`. Prompts are tool-agnostic and
+follow one skeleton (see the study): the body opens with the role's defining paragraph,
+then a `## Who you are` section of at most five lines — one emoji, one bold given name,
+and up to three traits drawn from the role's own constraints, never a claim of
+confidence — and the same emoji opens the role's `description`, which is where it lives
+within decision 9's minimum frontmatter. The plugin's own adapters under `agents/` are
+rendered from the roles by `render_agents.py sync`, never hand-edited. The orchestrator
+is you plus the commands.
 
-| Role | Player | May write | Must refuse | Commands |
-|---|---|---|---|---|
-| `architect` | Claude, main session (`opus`; `fable` for hard designs) | the change's artifacts | source, tests, commits | explore, propose |
-| `builder` | Codex via the plugin; Claude subagent as fallback | source and tests within the task's declared paths | ticking `tasks.md`, committing, editing specs, widening scope | apply |
-| `verifier` | Claude subagent, fresh context, read-only | nothing | fixing, committing, reopening settled decisions | propose (design review), verify |
-| `reviewer` | Claude subagent, fixed on `opus`, read-only | nothing | fixing, committing, judging spec coherence (the verifier's job) | review |
+| Role | Who | Player | May write | Must refuse | Commands |
+|---|---|---|---|---|---|
+| `architect` | — | Claude, main session (`opus`; `fable` for hard designs) | the change's artifacts | source, tests, commits | explore, propose |
+| `builder` | 💻 Savo | Codex via the plugin; Claude subagent as fallback | source and tests within the task's declared paths | ticking `tasks.md`, committing, editing specs, widening scope | apply |
+| `verifier` | 👀 Natalia | Claude subagent, fresh context, read-only | nothing | fixing, committing, reopening settled decisions | propose (design review), verify |
+| `reviewer` | 🔍 Almira | Claude subagent, fixed on `opus`, read-only | nothing | fixing, committing, judging spec coherence (the verifier's job) | review |
+| `test-engineer` | 🧪 Raul | Claude subagent, core team (`C10`) | tests only, where the project keeps them | production code, weakening a test to pass, ticking `tasks.md`, committing | by name — phase `apply`; no skill starts it in this version |
+| `debugger` | 🐛 Dani | Claude subagent, read-only, core team (`C10`) | nothing | fixing, committing, presenting a hypothesis as a diagnosis | by name — phase `review`; no skill starts it in this version |
+| `security-reviewer` | 🔐 Penélope | Claude subagent, read-only, rendered per profile (`C10`) | nothing | fixing, committing, printing a secret it finds, blocking | review |
+| `migration-reviewer` | 🧮 Jame | Claude subagent, read-only, rendered per profile (`C10`) | nothing | fixing, committing, running a migration, judging the application code (the reviewer's job) | review |
+| `accessibility-reviewer` | 🦽 Ana | Claude subagent, read-only, rendered per profile (`C10`) | nothing | fixing, committing, running the application, redesigning | review |
+| `api-designer` | 🔌 Gideon | Claude subagent, read-only, rendered per profile (`C10`) | nothing — its brief is the architect's input to `design.md` | writing an artifact, deciding what the proposal left open, naming a technology the project has not chosen | propose |
+| `designer` | 🎨 Ines | Claude subagent, read-only, rendered per profile (`C10`) | nothing — its brief is the architect's input to `design.md` | writing an artifact, deciding what the proposal left open | propose |
 
-UI design is a `ui` profile the architect loads during `propose`, seeded from the
-existing designer prompt; it produces `design.md`, the builder builds it, the verifier
-checks it. Independence comes from **context separation**: the verifier never shares a
-context with the builder. Commits happen only in `ship`, after your explicit yes.
+A profile's team is the set of fragments in its directory, one per specialist: `rails`
+and `fastapi` carry `security-reviewer`, `migration-reviewer` and `api-designer`;
+`flutter` carries `designer`, `accessibility-reviewer` and `security-reviewer`; a flat
+profile has no team. Only a `review`- or `propose`-phase role may receive a fragment, so
+every rendered agent is read-only. UI design is the `designer` advisor a profile's team
+may bring into `propose` (`C10`; `flutter` does, `react` has no team): the architect
+folds its brief into `design.md`, the builder builds it, the verifier checks it. Independence comes from **context
+separation**: the verifier never shares a context with the builder. Commits happen only
+in `ship`, after your explicit yes.
 
 ### What holds a role to its boundary
 
@@ -158,6 +184,14 @@ its own sandbox.
 | credentials never leave the machine | I · P: floor denies reading secret files; guard asks | I · P: Codex CLI's own `read-only`/`workspace-write` sandbox toggle, as read from `codex.mjs` and, for `gpt-5.6-terra`, now confirmed by observation — [S1](decisions/2026-09-27-s1-delegating-to-codex.md)'s 2026-09-28 update: `read-only` refused a write the model itself reported, `--write` applied one, confirmed in `git status` | I · P: floor + guard | P: as above | P: as above |
 | answers end with the canary word | I · D: Stop hook | I only | I · D: SubagentStop hook, when the set is on | I · D: SubagentStop hook | I · D: SubagentStop hook |
 
+The roles `C10` added bring one new mechanism each, and no cell above moves:
+
+| Rule | `test-engineer` | `debugger` | stack specialist, rendered |
+|---|---|---|---|
+| write only what the role may write | I only: tests, never production code — nothing stops it in this version, exactly as the builder outside the loop | I · P: `tools` has no `Edit`, `Write` or `Bash` | I · P: the role's `tools`, copied verbatim into the rendered agent · P: the renderer refuses a fragment for an `apply`- or `verify`-phase role, so no rendered agent can write |
+| never tick `tasks.md`, never edit specs; commit only in `ship` | I · P: guard asks, floor asks | P: as above | P: as above |
+| the prompt is the role's own | D: `render_agents.py sync --check`, run by the test suite — an edited role or a hand-edited adapter fails it | D: same check | D: the manifest's hash; `update` rewrites on drift, and a file at a rendered path the harness did not write is a conflict |
+
 **What v0.1 honestly offers:** the builder's boundaries are instruction plus
 deterministic detection before acceptance; prevention exists where Claude Code's
 session-wide permissions, a subagent's `tools` list and the Bash guard reach, and on the
@@ -177,15 +211,19 @@ harnex/
     .claude-plugin/plugin.json          name, version
     commands/                           explore, propose, apply, verify, ship (pillar 2) — but see below
     skills/                             setup, update (pillar 2) — setup landed in C1c as a skill, no command
-    agents/                             builder.md, verifier.md, reviewer.md (Claude adapters of the roles, pillar 3)
+    agents/                             builder.md, verifier.md, reviewer.md, test-engineer.md, debugger.md (Claude adapters of
+                                            the core roles, pillar 3 — rendered by scripts/render_agents.py sync, never hand-edited)
     hooks/hooks.json                    guard (PreToolUse Bash), canary (Stop, main session only) — inert without .harnex.yml
     context/                            1 · rules/ (one file per rule, grouped in sets), templates/ (AGENTS.md,
                                             CLAUDE.md, .harnex.yml, the pointer lines), memory.md
-    tools/                              2 · mcp/ declarations, profiles/ (python-fastapi, react-vite)
-    orchestration/                      3 · workflow.md, roles/ (prompts), decisions/ (typed questions, YAML)
+    tools/                              2 · mcp/ declarations, profiles/: fastapi/, rails/, flutter/ (each a profile.md plus one
+                                            <specialist>.md fragment per team member), react.md (flat, no team), ui.json
+    orchestration/                      3 · workflow.md, roles/ (ten prompts: the core team's five and five stack specialists),
+                                            decisions/ (typed questions, YAML)
     control/                            4 · floor.json (the permission floor), guard/ (patterns.yaml, guard.py), approvals.md
     feedback/                           5 · check-command.md, canary/canary.py, journal/format.md
-    scripts/                            decide.py (backend interface), setup.py, update.py — Python, run with uv
+    scripts/                            decide.py (backend interface), setup.py, update.py, render_agents.py (render, list,
+                                            sync) — Python, run with uv
   docs/                               PLAN.md, diagrams/, reviews, decisions/ (ADRs), smoke.md, observability.md (the owner's bench, not a component)
   openspec/                           harnex's own specs and changes
   tests/  pytest.ini                  harnex's own checks: the layout, the private names, the manifests
@@ -221,8 +259,10 @@ git repository with nothing to commit apart from the harness's own paths — `gi
 --porcelain` lists nothing else, untracked files included, ignored ones not — under
 either visibility (`C9`). The harness's own paths are the ones setup writes or owns
 (`AGENTS.md`, `CLAUDE.md`, `.harnex.yml`, `.harnex/`, `openspec/config.yaml`,
-`.claude/settings.json`, `.mcp.json`, `CLAUDE.local.md`, `.claude/settings.local.json`),
-so a rerun before the first commit, or after an interrupted run, still goes ahead. The
+`.claude/settings.json`, `.mcp.json`, `CLAUDE.local.md`, `.claude/settings.local.json`,
+and each rendered agent path under `.claude/agents/` — the path, never the directory —
+since `C10`), so a rerun before the first commit, or after an interrupted run, still
+goes ahead. The
 repository is found with `git rev-parse`, so a worktree and a project in a subdirectory
 of a repository both work; a subdirectory's status is scoped to its own subtree. Anything
 else is a conflict, shown alongside the rest of the plan and stopping it before it writes
@@ -243,6 +283,7 @@ this state:
 | `.harnex/manifest.json` | harness | yes | generation metadata: every harness-owned path and entry, with its hash |
 | `.claude/settings.json` | **shared, by entry** | yes | the harness owns the permission-floor entries it wrote, listed in the manifest; every other entry is yours |
 | `.mcp.json` | **shared, by entry** | yes | the harness owns the Playwright MCP entry it writes (for a UI profile, on explicit yes), listed in the manifest; every other entry is yours |
+| `.claude/agents/<profile>-<specialist>.md` | harness | yes | one per fragment of each chosen profile's team (`C10`): the role's prompt plus the stack's fragment, rendered by `render_agents.py`, written after the yes, refreshed by update asking nothing, and removed when its profile is dropped — each only while its hash still matches the manifest; a file at a rendered path the harness did not write is a conflict. The project's own agents in the same directory are never read, written or removed |
 | `openspec/config.yaml` | **project** | yes | created only if missing, with the harness's artifact rules; afterwards only you change it |
 | `.harnex/state/` | runtime | no | decision journal and apply run state; ignored by a `.gitignore` inside the directory itself, so the project's own `.gitignore` is never touched |
 | `.git/info/exclude` | **this clone** | no | only when `decision_model` is `jev`: one `.env` entry in the repository's own exclude list (resolved with `git rev-parse`, so a worktree's or a parent repository's), added whether or not `.env` exists yet, so the key the `jev` backend falls back to never reaches a commit from this clone (`C9`); it protects this clone only — every other clone has its own exclude list. `.env` itself and the project's own `.gitignore` are never read or written |
@@ -256,7 +297,8 @@ project is not being adopted by a team, only used by the person running it. Unde
 |---|---|---|---|
 | `AGENTS.md`, `CLAUDE.md`, `openspec/config.yaml`, `.claude/settings.json`, `.mcp.json` | **project** | — | never read for insertion, never written; exactly as they were before setup ran |
 | `CLAUDE.local.md` | harness | no | one `@.harnex/rules.md` import; excluded via `.git/info/exclude`, never the project's own `.gitignore` |
-| `.git/info/exclude` | **local** | no | lists `CLAUDE.local.md` and `.claude/settings.local.json`, plus `.env` when `decision_model` is `jev` (`C9`); `.env` itself is never read or written. The file is the repository's own, resolved with `git rev-parse --git-path info/exclude` — a worktree's common one, a parent repository's for a project in a subdirectory, whose entries are then anchored to the project's own prefix. The repository is always there already: setup requires one and never creates it (`C9`) |
+| `.claude/agents/<profile>-<specialist>.md` | harness | no | the same rendered agents as under `shared` (`C10`), each excluded by its own path in `.git/info/exclude`, so the project's own agents alongside are untouched |
+| `.git/info/exclude` | **local** | no | lists `CLAUDE.local.md` and `.claude/settings.local.json`, plus `.env` when `decision_model` is `jev` (`C9`), plus each rendered agent path (`C10`); `.env` itself is never read or written. The file is the repository's own, resolved with `git rev-parse --git-path info/exclude` — a worktree's common one, a parent repository's for a project in a subdirectory, whose entries are then anchored to the project's own prefix. The repository is always there already: setup requires one and never creates it (`C9`) |
 | `.harnex/config.yml` | **project** | no | your answers, `.harnex.yml`'s own ten-key local cousin — a new path, not a rename; `.harnex.yml` itself is untouched |
 | `.harnex/rules.md`, `.harnex/manifest.json`, `.harnex/state/` | harness / runtime | no | the whole of `.harnex/` ignores itself, not only `state/` |
 | `.claude/settings.local.json` | **local, by entry** | no | the permission floor's entries, Claude Code's own personal/gitignored settings layer |
@@ -935,16 +977,110 @@ enforces itself. Each is its own OpenSpec change, in this order.
   subdirectories away. A new precondition has to be read against every requirement it
   sits next to, not only the gap it closes; the harness's own paths now do not count.
 
+### C10 · agent teams — **delivered**, change `agent-teams`
+
+- **Delivers:** a profile may declare a team: `plugin/tools/profiles/<name>/` holds
+  `profile.md` (what the flat file held) and one `<specialist>.md` fragment per
+  specialist — what that stack adds to one role — and a flat profile (`react.md`) stays
+  valid with no team; `fastapi` moves into a directory, `rails` and `flutter` are new,
+  the first two carrying `security-reviewer`, `migration-reviewer` and `api-designer`,
+  the third `designer`, `accessibility-reviewer` and `security-reviewer` (`flutter` is
+  deliberately absent from `ui.json`). Seven new role prompts in
+  `orchestration/roles/`, each with a `phase` field next to `name`, `description` and
+  `tools`: `test-engineer` (`apply`) and `debugger` (`review`) join the core team as
+  plugin agents, started by the person by name in this version; the five specialists are
+  `review`- or `propose`-phase and read-only, the only phases a fragment may target. Every
+  role, the three existing ones included, gains a `## Who you are` persona: an emoji and
+  a given name (`💻 Savo`, `🔍 Almira`, `👀 Natalia`, `🧪 Raul`, `🐛 Dani`, `🔐 Penélope`,
+  `🧮 Jame`, `🦽 Ana`, `🔌 Gideon`, `🎨 Ines`) and up to three traits drawn from the role's
+  own constraints, the emoji repeated at the head of `description`. A new
+  `plugin/scripts/render_agents.py`: `render` composes, for each chosen profile with a
+  team and each fragment in it, one agent — the role's frontmatter with the name prefixed
+  by the profile, `phase` dropped, the body whole, then the fragment as a
+  `## For this stack: <profile>` section — as a pure function of the chosen profiles; `list`
+  prints each agent's emoji and `name` for a phase; `sync` rewrites the plugin's own
+  adapters under `agents/` from the roles, so an adapter is a build artifact and
+  `sync --check` is the correspondence test. `setup.py` plans the rendered agents under
+  `.claude/agents/<profile>-<specialist>.md` as harness-owned paths by hash, with the
+  create, update, conflict and adopt outcomes `.harnex/rules.md` has, removes an agent
+  the harness wrote and no longer renders, excludes each by its own path under `local`
+  visibility, and exempts each rendered path (not the directory) from the clean-tree
+  precondition; `update` refreshes them asking nothing. `/harnex:review` starts every
+  `review`-phase agent of the project's teams after the core reviewer and shows each
+  review as returned, labelled with the agent's emoji and `name`; `/harnex:propose`
+  consults every `propose`-phase agent before `design.md` is written and still runs the
+  verifier once. The setup skill says which specialists each offered profile brings.
+  This change revises decision 4 (§12) again, as `C5` did — the three write boundaries
+  stay, the count of roles does not — and extends decision 1; decision 11 is untouched.
+- **You try it:** on a committed scratch project, `/harnex:setup` choosing `rails`: the
+  profile offer names its three specialists, the plan shows three agent paths, and after
+  the yes `.claude/agents/rails-security-reviewer.md`, `rails-migration-reviewer.md` and
+  `rails-api-designer.md` exist, each carrying its role's own `## Who you are`; a rerun
+  before committing plans nothing to do. `/harnex:review` on a diff shows three reviews,
+  the core reviewer's first, then one per stack reviewer under its `<emoji> <name>`
+  label; `/harnex:propose` consults the API designer before writing `design.md`. Drop
+  `rails` from `.harnex.yml` and run `/harnex:update`: the three agents go. Write an
+  agent by hand at a rendered path: setup and update report a conflict. Full steps in
+  `docs/smoke.md`'s own "agent-teams (C10)" section.
+- **Tests:** `render_agents.py`'s `render` against each profile's fragments (byte-stable,
+  role plus fragment), its refusal of a fragment for an unknown role or an `apply`- or
+  `verify`-phase role, `list`'s emoji-and-name lines, and `sync --check` clean against
+  the shipped adapters; every role's frontmatter and `phase`, the read-only `tools` of
+  every `review`-, `propose`- and `verify`-phase role, and the persona's shape (first
+  `##` heading, five lines at most, emoji category and equality with `description`'s,
+  names and emojis unique); `setup.py`'s agent plan, write, removal, conflict and
+  clean-tree exemption, the `local` exclude entries, and `update`'s refresh and removal;
+  the `setup`, `update`, `review` and `propose` skills' wording.
+- **Exit:** the proposal's criterion — a project that chose `rails`, `fastapi` or
+  `flutter` finds, after `/harnex:setup`, one agent per specialist of that profile's team
+  under `.claude/agents/`, named `<profile>-<specialist>`, owned by the harness by hash;
+  `/harnex:review` starts every reviewer of the project's teams alongside the core
+  `reviewer` and shows each review as returned, labelled with the agent's emoji and
+  `name`; `/harnex:propose` consults every advisor of the project's teams before
+  `design.md` is written; `/harnex:update` refreshes the agents when the harness's own
+  content changes; and a profile dropped from `.harnex.yml` takes its agents with it on
+  the next run — all tried by hand on a scratch project, with every rule the plugin
+  already enforces still holding. **Outcome:** met. On 2026-10-12, against Claude Code
+  2.1.287, OpenSpec 1.11.0 and Python 3.13 through `uv`: `uv run --with pytest pytest`
+  (766 passed, 8 skipped — the four skips of the personal denylist half and the four of
+  the read-only check on the two `apply` roles, none of them the manifest check), both `claude plugin validate --strict` calls and
+  `openspec validate --all` (18 of 18) pass, and `render_agents.py sync --check` is
+  silent. The whole of `docs/smoke.md`'s "agent-teams (C10)" section was walked on a
+  scratch `rails` project. Steps 2 to 5 and 8 to 11 through `setup.py` and `update.py`
+  with an answers file, every expectation holding: `choices` returns each team's
+  specialists with their emoji and phase, which the setup skill shows as emoji, one
+  space, specialist; the plan shows the three `create` lines and the write lands the
+  three agents, listed in the manifest by hash and untracked beside the rest under
+  `shared`; each rendered agent's persona and fragment are byte-identical to the role and
+  the profile; a rerun with the agents uncommitted says "Nothing to do" and changes no
+  byte; `update` after `rails` is dropped removes the three and reports them under
+  `Removed:`, with `.harnex.yml` untouched; a hand-written agent at a rendered path is a
+  `conflict` that stops the write, and `adopt`, once approved, replaces it with the
+  rendering, and the conflict sentence says the harness has no record of writing the
+  path rather than that it was edited; and under `local` visibility each agent path is
+  excluded on its own line, with `git status --porcelain` empty. The session-driven steps — the plugin's listing of
+  the five core agents (step 1), the `/harnex:setup` dialogue and its rerun (steps 2 and
+  5), `/harnex:review` showing the core review and then the two stack reviews under their
+  `<emoji> <name>` labels (step 6), and `/harnex:propose` consulting
+  `🔌 rails-api-designer` once, before `design.md` (step 7) — were walked by the owner in
+  a fresh session with this version installed, and behaved as **Expect** describes. Named
+  out of scope by the proposal: after `update` has removed a profile's agents, the
+  deletions sit uncommitted and the record no longer lists the paths, so a `setup` rerun
+  before the commit counts them as a dirty tree and refuses; the smoke section commits
+  first, and closing the gap is its own change.
+
 Later, not scheduled: tuning thresholds from the journal's resolutions; a Codex-side guard
-hook; a `security-reviewer` for projects with an attack surface; promoting a `local` setup
-to `shared`. Never: an unattended mode.
+hook; a team for a further stack (a profile directory and its fragments, no code);
+pairing `test-engineer` with the builder inside the apply loop and giving `debugger` a
+place in `apply`'s escalation; promoting a `local` setup to `shared`. Never: an
+unattended mode.
 
 ## 12. Decisions taken
 
-1. Organised by the five pillars; placement by topic; stacks are profiles.
+1. Organised by the five pillars; placement by topic; stacks are profiles, and a profile may declare a team: its directory's fragments, one per specialist role (`C10`).
 2. Claude Code is the only cockpit. Codex is reached through its official plugin only.
 3. Delivery is a Claude Code plugin for behaviour plus a handful of small files per project (§6). Ownership is by file, with a committed hash manifest; the one exception, `.claude/settings.json`, is owned by entry. Copier and the old marketplace are dropped.
-4. Four roles: architect, builder, verifier, reviewer. The orchestrator is the human. Commits only in `ship`.
+4. Eleven roles (`C10`; three when first written, four since `C5`), ten of them prompts under `orchestration/roles/` — the architect is the main session and has none: architect, builder, verifier, reviewer, test-engineer, debugger, and five stack specialists — security-reviewer, migration-reviewer, accessibility-reviewer, api-designer, designer — rendered per project from a profile's team. The three write boundaries are fixed whatever the count: a role writes source (builder, and test-engineer for tests alone), writes the change's artifacts (architect), or reads only (every other). The orchestrator is the human. Commits only in `ship`.
 5. The decision model sits behind one interface; `jev` and `mock` backends in v0.1; each question carries its own rule on probabilities; `mock` behaviour is defined for every question.
 6. The guard is deterministic first and never allows on its own error; deny never comes from the model alone. Because a hook that crashes or times out cannot answer, a permission floor in `.claude/settings.json` carries the same deny and ask patterns (§9).
 7. The canary is a rule plus a `Stop` hook on the **main session's answers only**, active only in a project that chose the `canary` set; setup proposes `Hullaballoo!`, the word lives in `.harnex.yml`, and setup also states it in `AGENTS.md` since a rendered rules file cannot. Its warning is a signal of non-compliance, not a diagnosis of lost context.

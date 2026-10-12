@@ -17,8 +17,9 @@ from pathlib import Path
 
 import pytest
 
+import render_agents
 import setup
-from conftest import commit_all, tree
+from conftest import FLAT_PROFILE, TEAM_PROFILE, commit_all, team_agent_paths, tree
 
 SNAPSHOTS = Path(__file__).resolve().parent / "snapshots"
 DELIMITER = "===== "
@@ -341,3 +342,150 @@ def test_the_only_writes_to_a_project_owned_path_are_creation_and_the_approved_l
             assert step.action in (setup.CREATE, setup.INSERT)
             if step.action == setup.INSERT:
                 assert step.path == "AGENTS.md", "only the approved file is written"
+
+
+# --- the chosen profiles' agents (agent-teams, design.md D3) -------------------------
+
+
+def _record(project: Path) -> dict:
+    return json.loads((project / setup.MANIFEST).read_text(encoding="utf-8"))
+
+
+def test_a_profile_with_a_team_writes_and_records_its_three_agents(
+    project: Path, answers, setup_run, team_plugin_root: Path
+) -> None:
+    answers["profiles"] = [TEAM_PROFILE]
+    code, said = setup_run("write", project, answers, plugin_root=team_plugin_root)
+    assert code == 0
+    paths = team_agent_paths()
+    assert len(paths) == 3
+    rendered = render_agents.render([TEAM_PROFILE], team_plugin_root)
+    assert {path: (project / path).read_bytes() for path in paths} == rendered
+    assert all(path in said for path in paths), "each agent is a line of the plan"
+    record = _record(project)
+    assert set(record["paths"]) == set(setup.HARNESS_PATHS) | set(paths)
+    for path in paths:
+        assert record["paths"][path] == setup.digest((project / path).read_bytes())
+
+
+def test_a_flat_profile_writes_no_agent(
+    project: Path, answers, setup_run, team_plugin_root: Path
+) -> None:
+    answers["profiles"] = [FLAT_PROFILE]
+    code, said = setup_run("write", project, answers, plugin_root=team_plugin_root)
+    assert code == 0
+    assert not (project / ".claude" / "agents").exists()
+    assert setup.AGENTS_DIR not in said
+    assert set(_record(project)["paths"]) == set(setup.HARNESS_PATHS)
+
+
+def test_a_second_run_with_a_team_changes_nothing(
+    project: Path, answers, setup_run, team_plugin_root: Path
+) -> None:
+    answers["profiles"] = [TEAM_PROFILE]
+    setup_run("write", project, answers, plugin_root=team_plugin_root)
+    before = tree(project)
+    code, said = setup_run("write", project, answers, plugin_root=team_plugin_root)
+    assert code == 0 and "Nothing to do" in said
+    assert tree(project) == before, "a second run moved a byte, including the record"
+
+
+def test_the_project_s_own_agent_is_never_touched(
+    project: Path, answers, setup_run, team_plugin_root: Path
+) -> None:
+    own = project / ".claude" / "agents" / "own.md"
+    own.parent.mkdir(parents=True)
+    own.write_text("# Mine\n", encoding="utf-8")
+    answers["profiles"] = [TEAM_PROFILE]
+    code, said = setup_run("write", project, answers, plugin_root=team_plugin_root)
+    assert code == 0, said
+    assert own.read_text(encoding="utf-8") == "# Mine\n"
+    assert "own.md" not in said, "never surveyed, never planned"
+    assert ".claude/agents/own.md" not in _record(project)["paths"]
+    assert all((project / path).is_file() for path in team_agent_paths())
+
+
+def test_a_hand_written_agent_at_a_rendered_path_is_a_conflict_until_adopted(
+    project: Path, answers, setup_run, team_plugin_root: Path
+) -> None:
+    answers["profiles"] = [TEAM_PROFILE]
+    first, *rest = team_agent_paths()
+    (project / first).parent.mkdir(parents=True)
+    foreign = "# An agent I wrote at this very path\n"
+    (project / first).write_text(foreign, encoding="utf-8")
+
+    code, said = setup_run("write", project, answers, plugin_root=team_plugin_root)
+    assert code == 1
+    assert first in said and "approve its adoption" in said
+    assert (project / first).read_text(encoding="utf-8") == foreign
+    assert not any((project / path).exists() for path in rest), "nothing is written meanwhile"
+
+    answers["approvals"]["adopt"] = [first]
+    code, _ = setup_run("write", project, answers, plugin_root=team_plugin_root)
+    assert code == 0
+    rendered = render_agents.render([TEAM_PROFILE], team_plugin_root)
+    assert (project / first).read_bytes() == rendered[first]
+    assert all((project / path).read_bytes() == rendered[path] for path in rest)
+
+
+def test_adopting_an_agent_the_harness_would_not_render_is_refused(
+    team_plugin_root: Path, answers
+) -> None:
+    """Adoption reaches a rendered path and no other: the project's own agent, or one of
+    a profile that was not chosen, is not the harness's to replace."""
+    answers["profiles"] = [TEAM_PROFILE]
+    for path in (".claude/agents/own.md", f".claude/agents/{FLAT_PROFILE}-reviewer.md"):
+        answers["approvals"]["adopt"] = [path]
+        with pytest.raises(setup.SetupError, match="cannot adopt"):
+            setup.read_answers(json.dumps(answers), team_plugin_root)
+
+
+def test_dropping_the_profile_removes_its_three_agents_and_leaves_the_project_s_own(
+    project: Path, answers, setup_run, team_plugin_root: Path
+) -> None:
+    """The one deletion the harness ever makes, after the same yes as every write: the
+    agents the record lists and the choices no longer produce are gone, the record no
+    longer lists them, and the project's own agent beside them is exactly as it was."""
+    own = project / ".claude" / "agents" / "own.md"
+    own.parent.mkdir(parents=True)
+    own.write_text("# Mine\n", encoding="utf-8")
+    answers["profiles"] = [TEAM_PROFILE]
+    code, _ = setup_run("write", project, answers, plugin_root=team_plugin_root)
+    assert code == 0
+    paths = team_agent_paths()
+    assert all((project / path).is_file() for path in paths)
+
+    answers["profiles"] = []
+    code, said = setup_run("write", project, answers, plugin_root=team_plugin_root)
+    assert code == 0, said
+    assert all(f"remove    {path}" in said for path in paths), "each removal is a line"
+    assert "Removed: " + ", ".join(paths) in said
+    assert not any((project / path).exists() for path in paths)
+    assert own.read_text(encoding="utf-8") == "# Mine\n"
+    assert "own.md" not in said
+    assert set(_record(project)["paths"]) == set(setup.HARNESS_PATHS)
+
+    before = tree(project)
+    code, said = setup_run("write", project, answers, plugin_root=team_plugin_root)
+    assert code == 0 and "Nothing to do" in said
+    assert tree(project) == before
+
+
+def test_an_edited_stale_agent_stops_the_write_and_nothing_is_removed(
+    project: Path, answers, setup_run, team_plugin_root: Path
+) -> None:
+    answers["profiles"] = [TEAM_PROFILE]
+    code, _ = setup_run("write", project, answers, plugin_root=team_plugin_root)
+    assert code == 0
+    first, *rest = team_agent_paths()
+    (project / first).write_text("edited by hand\n", encoding="utf-8")
+    commit_all(project)
+    before = tree(project)
+
+    answers["profiles"] = []
+    code, said = setup_run("write", project, answers, plugin_root=team_plugin_root)
+    assert code == 1
+    assert first in said and "edited after the harness wrote it" in said
+    assert "approve its adoption" not in said
+    assert tree(project) == before, "the conflict stands, so nothing is removed or written"
+    assert set(team_agent_paths()) <= set(_record(project)["paths"])

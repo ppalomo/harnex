@@ -6,10 +6,13 @@ The hands: what the agent can actually do, and what it needs installed to do it.
 
 - **MCP server declarations** under `mcp/`: which servers a harnessed project gets, and
   what each is for.
-- **Stack profiles** under `profiles/`: one file per stack, holding its check command, its
-  conventions and the tools it expects. **`plugin/tools/profiles/` and `plugin/tools/mcp/`
-  are the only places in the plugin where a technology may be named.** A profile is chosen
-  per project, not assumed.
+- **Stack profiles** under `profiles/`: one per stack, holding its check command, its
+  conventions and the tools it expects. A profile is a flat `<name>.md`, or (`C10`) a
+  directory `<name>/` whose `profile.md` is the profile and whose other `<specialist>.md`
+  files are the team's fragments — what the stack adds to one specialist role under
+  `../orchestration/roles/`. A flat profile is still valid; it simply has no team.
+  **`plugin/tools/profiles/` and `plugin/tools/mcp/` are the only places in the plugin
+  where a technology may be named.** A profile is chosen per project, not assumed.
 
 ## What does not
 
@@ -29,9 +32,23 @@ The hands: what the agent can actually do, and what it needs installed to do it.
 - `../scripts/setup.py` — every step of that procedure that touches the filesystem. It
   surveys, plans, refuses while a conflict stands, and writes atomically with the record
   last. The questions belong to the session; the writes belong to the script.
-- `profiles/fastapi.md`, `profiles/react.md` — the first two stack profiles, `C3`: check
-  command, conventions and tools expected, project facts read from `AGENTS.md` rather than
-  assumed.
+- `profiles/fastapi/` — the first stack profile (`C3`), a directory since `C10`:
+  `profile.md` holds the check command, conventions and tools expected, with project
+  facts read from `AGENTS.md` rather than assumed; its team is `api-designer`,
+  `migration-reviewer` and `security-reviewer`.
+- `profiles/rails/` — a stack profile with the same three specialists, `C10`.
+- `profiles/flutter/` — a UI profile whose team is `designer`, `accessibility-reviewer`
+  and `security-reviewer`, `C10`. It is deliberately absent from `ui.json`, since the
+  browser step does not apply to it; `profile.md` says what evidence `verify` reads
+  instead.
+- `profiles/react.md` — a flat stack profile, `C3`, with no team yet.
+- `profiles/ui.json` — the registry of UI profiles; a name listed there means "Playwright
+  applies" in `verify`.
+- **The fragment convention**, `C10`: a fragment has no frontmatter and is written in the
+  role's voice. `../scripts/render_agents.py` renders it as the `## For this stack:
+  <profile>` section after the role's body, into `.claude/agents/<profile>-<specialist>.md`
+  in a harnessed project. A fragment for a role the harness does not hold, or for an
+  `apply`- or `verify`-phase role, is refused, not skipped.
 
 ## Still to come
 

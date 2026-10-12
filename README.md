@@ -43,6 +43,7 @@
 | **A shell guard** | Decides before any command runs: deterministic rules first, the decision model for the ambiguous rest, never a silent allow on its own error — backed by a permission floor in the project's settings for when the hook itself cannot run. |
 | **A canary** | If you want one: every answer must end with a word you choose. When it goes missing, that instruction was not followed — a cheap sign the rules may have dropped out of the context. |
 | **Rule sets** | Git, code, spec-driven work, safety, language — written once, rendered into each project, and enforced by hooks where they can be. |
+| **Agents with a name** | Five ship with the plugin — 💻 Savo the `builder`, 🔍 Almira the `reviewer`, 👀 Natalia the `verifier`, 🧪 Raul the `test-engineer`, 🐛 Dani the `debugger` — each with an emoji and a name so a listing and a review tell them apart. The `rails`, `fastapi` and `flutter` profiles each bring a team of stack specialists, rendered into your project's `.claude/agents/` and started by `review` and `propose`. |
 
 ## 🧩 How it is organised
 
@@ -92,8 +93,9 @@ Then, once per project, new or existing, from inside Claude Code:
 
 It asks a few questions, shows you a plan and writes only after your yes: `.harnex.yml`,
 `.harnex/rules.md`, `.harnex/manifest.json`, a permission floor merged into
-`.claude/settings.json`, and — only where they are missing — `AGENTS.md`, `CLAUDE.md` and
-`openspec/config.yaml`. Files you already have stay yours; setup asks before adding the
+`.claude/settings.json`, one agent per specialist of each chosen profile's team under
+`.claude/agents/` (`rails-security-reviewer.md` and so on), and — only where they are
+missing — `AGENTS.md`, `CLAUDE.md` and `openspec/config.yaml`. Files you already have stay yours; setup asks before adding the
 one pointer line each needs. The project is harnessed as soon as this command finishes.
 
 From here on, whenever harnex itself changes, two commands catch the project up —
@@ -111,8 +113,8 @@ then, from inside Claude Code:
 
 `claude plugin update harnex` updates the plugin on your machine; `/harnex:update`
 refreshes the files the harness owns in the project — `.harnex/rules.md`, the
-permission-floor entries, and the Playwright MCP entry if one is already there — from the
-choices `/harnex:setup` already recorded in `.harnex.yml`. It asks no question and never
+permission-floor entries, the rendered agents, and the Playwright MCP entry if one is
+already there — from the choices `/harnex:setup` already recorded in `.harnex.yml`. It asks no question and never
 touches a file the project owns. In a project that never ran setup, the plugin does
 nothing.
 

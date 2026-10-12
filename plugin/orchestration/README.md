@@ -18,8 +18,13 @@ The nervous system: who does what, in which order, and who decides.
   actually reads, under `../agents/` — still belongs to this pillar even though it cannot
   live inside `orchestration/` itself (the host looks for it at the plugin root) or import
   the role prompt it binds (an agent's body has no import syntax, verified against Claude
-  Code's own docs while designing `C2`). It is a verbatim copy, and a test walks the
-  correspondence so the two cannot drift apart unnoticed.
+  Code's own docs while designing `C2` and again for `agent-teams`). So the adapter holds
+  the role's text, but nobody maintains it: it is the output of
+  `../scripts/render_agents.py sync` — the role's `name`, `description` and `tools`, no
+  `phase`, the body whole — and is never edited by hand. A test asserts that
+  `sync --check` is clean, so an edited role with a stale adapter, or a hand-edited
+  adapter, fails the suite naming the adapter, and the fix is to run `sync`. A new core
+  agent is an empty file of the role's name under `../agents/`, filled by `sync`.
 - **Guardrails.** A question that judges *risk* before an action belongs to pillar 4, even
   though it is a decision. Orchestration routes work; control stops it.
 
@@ -46,6 +51,11 @@ The nervous system: who does what, in which order, and who decides.
   here.
 - `../agents/reviewer.md` — the reviewer's Claude Code adapter (`C5`), binding
   `roles/reviewer.md`; it always runs on the fixed `opus` model.
+- `../agents/test-engineer.md` — the test engineer's Claude Code adapter (`C10`), binding
+  `roles/test-engineer.md`; in this version no skill starts it — the person starts it by
+  name.
+- `../agents/debugger.md` — the debugger's Claude Code adapter (`C10`), binding
+  `roles/debugger.md`; in this version no skill starts it — the person starts it by name.
 
 ## Filled by
 

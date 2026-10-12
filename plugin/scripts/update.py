@@ -123,6 +123,10 @@ def run_update(project: Path, plugin_root: Path, home: Path | None = None) -> tu
     report = setup.render_plan(plan, verb="write")
     if written:
         report += "Written: " + ", ".join(written) + "\n"
+    if plan.removals:
+        # The stale agents `apply_plan` deleted (design.md D3), named the way `setup.py`'s
+        # own `write` verb names them: `apply_plan` returns only what it wrote.
+        report += "Removed: " + ", ".join(step.path for step in plan.removals) + "\n"
     return report, True
 
 
