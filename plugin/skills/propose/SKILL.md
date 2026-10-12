@@ -71,6 +71,56 @@ and should not do, how it should work — in their own words; never ask them to 
 one artifact can unblock another. Keep going until every artifact the change's own schema
 requires exists.
 
+One sub-step sits inside this loop, and it applies exactly once per run: after
+`proposal.md` exists and before `design.md` is written.
+
+### Consult the project's advisors — once, after the proposal, before `design.md`
+
+The profiles a project chose may bring a team, and some of it advises this phase:
+designers rendered into the project's `.claude/agents/` by `setup` and `update`. They
+read the proposal and return a brief; you, the architect, write `design.md` from it.
+Read the recorded profiles from the same source as step 2 — `.harnex/config.yml` if it
+exists (`local` visibility), otherwise `.harnex.yml`, its `profiles` list. If neither
+exists, or the list is empty, skip this whole sub-step: the command proceeds exactly as
+before this capability existed, and `design.md` is written from the proposal and the
+conversation alone.
+
+Otherwise ask the harness which agents this phase starts:
+
+```
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/render_agents.py" list --profiles <a,b> --phase propose
+```
+
+It prints one line per agent: the agent's emoji, exactly one space, then its `name` —
+for example `🔌 <profile>-api-designer`. If it prints nothing, skip the rest of this
+sub-step for the same reason as above. Never read an agent's body to find its emoji or
+name; the list is the only source for both.
+
+For each line, in the order printed, check that `.claude/agents/<name>.md` exists in the
+project. If it does not, tell the person that line, say the agent is missing from
+`.claude/agents/`, and name `/harnex:update` as the remedy, which renders it; then go on
+with the others. Never render or write the agent here.
+
+Start each agent that exists once — the `Agent` tool, `subagent_type: <name>` — with the
+path of `proposal.md` and the change's directory to read, and with no `model` override.
+Ask each for its brief on the proposal, and nothing else: an advisor is read-only, it
+writes nothing, and it is never asked to write an artifact or any part of one. Start them
+in parallel where the host allows; they are independent. Wait for every brief you can
+obtain before writing `design.md`, and never start an advisor a second time, whatever
+comes back.
+
+### Fold the briefs into `design.md`, naming the advisor
+
+When `design.md` is `ready`, write it as you would any other artifact — from its
+`openspec instructions`, from `proposal.md` re-read from disk, and now from the briefs.
+Each brief is your own input, not a section to paste: a decision, a section or a
+trade-off you take from a brief names the advisor it came from, by the list's own line
+for that agent — the emoji, one space, the `name` — so a reader knows whose brief a
+section comes from. Where two advisors disagree, the call is yours, and the design says
+which advice it took and why. A brief you did not use is not pasted in; a brief that was
+missing (step above) is mentioned in the design's open questions, if its absence leaves
+one. Once `design.md` exists, the advisors are not consulted again in this run.
+
 ## 6. Check the change stayed inside its own directory
 
 ```
@@ -88,6 +138,9 @@ change's directory to review. Present its review exactly as it comes back — do
 summarise away a finding, and do not revise an artifact on its behalf. Whether to act on
 what it found is the person's call.
 
+The verifier still runs exactly once, here, at the end, after every required artifact
+exists — the advisors of step 5 do not replace it, and it is not started any earlier.
+
 ## 8. Finish
 
 Tell the person where the artifacts live — `openspec/changes/<name>/` under `shared`
@@ -100,4 +153,7 @@ not yet.
 - Write anything outside the new change's own directory without reporting it (step 6).
 - Ask the person to name an OpenSpec concept instead of describing what they want.
 - Call the verifier more than once per run, or edit an artifact after it has reviewed.
+- Start an advisor more than once per run, or consult an advisor after `design.md` exists.
+- Let an advisor write an artifact, or any part of one; the architect writes `design.md`.
+- Render or write an agent; a missing one is reported, with `/harnex:update` as the remedy.
 - Tick anything, since there is no `tasks.md` execution here — that is `apply`'s job.

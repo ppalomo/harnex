@@ -15,7 +15,7 @@ import pytest
 
 import setup
 import update
-from conftest import tree
+from conftest import TEAM_PROFILE, TEAM_SPECIALISTS, commit_all, git, team_agent_paths, tree
 
 
 def test_refuses_when_the_project_was_never_set_up(project: Path, plugin_root: Path) -> None:
@@ -202,3 +202,153 @@ def test_the_cli_exits_zero_and_reports_what_it_wrote(
     out, _ = capsys.readouterr()
     assert "Written:" in out
     assert setup.RULES in out
+
+
+# --- a profile with a team (agent-teams, design.md D3) --------------------------------
+
+
+def _record(project: Path) -> dict:
+    return json.loads((project / setup.MANIFEST).read_text(encoding="utf-8"))
+
+
+def _set_up_with_the_team(project: Path, answers: dict, setup_run, team_plugin_root: Path) -> None:
+    """A shared project set up with the fixture team, committed as a person would commit
+    it after setup: the three agents and the record are in the history."""
+    answers["profiles"] = [TEAM_PROFILE]
+    code, said = setup_run("write", project, answers, plugin_root=team_plugin_root)
+    assert code == 0, said
+    commit_all(project)
+
+
+def _drop_the_profile_by_hand(project: Path) -> None:
+    """The person's own edit to `.harnex.yml`: the profile's line is gone, nothing else
+    moves, and the edit is committed, as it would be before an update."""
+    choices_path = project / setup.CHOICES
+    lines = choices_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    kept = [line for line in lines if line.strip() != f"- {TEAM_PROFILE}"]
+    assert len(kept) == len(lines) - 1, "the choices must have listed the profile once"
+    choices_path.write_text("".join(kept), encoding="utf-8")
+    commit_all(project)
+
+
+def test_a_changed_fragment_rewrites_its_agent_and_nothing_else_moves(
+    project: Path, answers, setup_run, team_plugin_root: Path
+) -> None:
+    """The harness's own fragment changed under it, so the one agent rendered from it is
+    rewritten and re-recorded on update, asking nothing -- the profile was recorded at
+    setup. The other two agents, the rules and the recorded choices stay as they were.
+    `team_plugin_root` is already a copy of the shipped plugin, so the fragment is edited
+    in place, the way the other tests edit a copied rule."""
+    _set_up_with_the_team(project, answers, setup_run, team_plugin_root)
+    before = tree(project)
+
+    specialist = sorted(TEAM_SPECIALISTS)[0]
+    fragment = team_plugin_root / "tools" / "profiles" / TEAM_PROFILE / f"{specialist}.md"
+    fragment.write_text(
+        fragment.read_text(encoding="utf-8") + "\nAn added sentence.\n", encoding="utf-8"
+    )
+    changed_agent, *others = team_agent_paths()
+    assert changed_agent.endswith(f"{TEAM_PROFILE}-{specialist}.md")
+
+    report, ok = update.run_update(project, team_plugin_root)
+    assert ok is True
+    assert f"update    {changed_agent}" in report, "the agent is planned as an update"
+    assert all(f"unchanged {path}" in report for path in others)
+    assert "Conflicts" not in report and "approve" not in report, "nothing was asked"
+    assert "Written:" in report and changed_agent in report
+
+    after = tree(project)
+    assert set(after) == set(before), "no path appeared or disappeared"
+    changed = {path for path in before if before[path] != after[path]}
+    assert changed == {changed_agent, setup.MANIFEST}, (
+        "only the rendered agent and the record that hashes it should move"
+    )
+    assert "An added sentence." in after[changed_agent].decode("utf-8")
+    record = _record(project)
+    assert record["paths"][changed_agent] == setup.digest(after[changed_agent])
+    assert record["paths"][changed_agent] != setup.digest(before[changed_agent])
+    assert after[setup.RULES] == before[setup.RULES]
+    assert after[setup.CHOICES] == before[setup.CHOICES], "the recorded choices are untouched"
+
+
+def test_a_fresh_clone_of_a_project_with_a_team_plans_its_agents_unchanged(
+    project: Path, answers, setup_run, team_plugin_root: Path, tmp_path: Path
+) -> None:
+    """The agents were committed with the record, so a clone holds them exactly as the
+    harness wrote them: update reports each one unchanged, and restores only the one path
+    a clone never carries, the runtime state's own ignore file."""
+    _set_up_with_the_team(project, answers, setup_run, team_plugin_root)
+    clone = tmp_path / "clone"
+    git(tmp_path, "clone", "-q", str(project), str(clone))
+    paths = team_agent_paths()
+    assert all((clone / path).read_bytes() == (project / path).read_bytes() for path in paths)
+    before = tree(clone)
+    assert setup.STATE_IGNORE not in before, "a clone never carries the runtime state"
+
+    report, ok = update.run_update(clone, team_plugin_root)
+    assert ok is True
+    assert all(f"unchanged {path}" in report for path in paths), (
+        "every rendered agent is reported unchanged"
+    )
+    assert "Written:" in report and setup.STATE_IGNORE in report
+    assert "Removed:" not in report
+
+    after = tree(clone)
+    assert set(after) - set(before) == {setup.STATE_IGNORE}, (
+        "only the state directory's own ignore file should appear"
+    )
+    assert all(before[path] == after[path] for path in before), (
+        "every committed path, the agents included, must be left as it was"
+    )
+    assert set(_record(clone)["paths"]) == set(setup.HARNESS_PATHS) | set(paths)
+
+
+def test_a_dropped_profile_removes_its_agents_on_update_without_asking(
+    project: Path, answers, setup_run, team_plugin_root: Path, capsys
+) -> None:
+    """The person dropped the profile from the recorded choices by hand; the next update
+    removes the three agents the record lists and the profiles no longer render, drops
+    them from the record, leaves the project's own agent beside them alone, and names
+    what it removed -- all in one pass, with no yes to collect."""
+    own = project / ".claude" / "agents" / "own.md"
+    own.parent.mkdir(parents=True)
+    own.write_text("# Mine\n", encoding="utf-8")
+    _set_up_with_the_team(project, answers, setup_run, team_plugin_root)
+    paths = team_agent_paths()
+    assert all((project / path).is_file() for path in paths)
+    _drop_the_profile_by_hand(project)
+
+    code = update.main(["--project", str(project), "--plugin-root", str(team_plugin_root)])
+    assert code == 0
+    out, err = capsys.readouterr()
+    assert err == ""
+    assert all(f"remove    {path}" in out for path in paths), "each removal is a line"
+    assert "Removed: " + ", ".join(paths) in out
+    assert "Conflicts" not in out and "approve" not in out, "nothing was asked"
+    assert not any((project / path).exists() for path in paths)
+    assert own.read_text(encoding="utf-8") == "# Mine\n"
+    assert "own.md" not in out
+    assert set(_record(project)["paths"]) == set(setup.HARNESS_PATHS)
+
+    before = tree(project)
+    report, ok = update.run_update(project, team_plugin_root)
+    assert ok is True and "Nothing to do" in report
+    assert tree(project) == before
+
+
+def test_an_edited_stale_agent_stops_the_update_and_nothing_is_removed(
+    project: Path, answers, setup_run, team_plugin_root: Path
+) -> None:
+    _set_up_with_the_team(project, answers, setup_run, team_plugin_root)
+    first, *rest = team_agent_paths()
+    (project / first).write_text("edited by hand\n", encoding="utf-8")
+    _drop_the_profile_by_hand(project)
+    before = tree(project)
+
+    report, ok = update.run_update(project, team_plugin_root)
+    assert ok is False
+    assert first in report and "edited after the harness wrote it" in report
+    assert "approve its adoption" not in report
+    assert tree(project) == before, "the conflict stands, so nothing is removed or written"
+    assert all((project / path).is_file() for path in rest)
+    assert set(team_agent_paths()) <= set(_record(project)["paths"])

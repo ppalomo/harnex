@@ -23,7 +23,7 @@ def test_the_choices_come_from_what_the_harness_holds(plugin_root: Path) -> None
 
 def test_a_kind_of_choice_with_nothing_to_choose_from(tmp_path: Path, plugin_root: Path) -> None:
     """Profile documents and features are both discovered from the harness itself."""
-    assert setup.available_profiles(plugin_root) == ["fastapi", "react"]
+    assert setup.available_profiles(plugin_root) == ["fastapi", "flutter", "rails", "react"]
     assert setup.available_features(plugin_root) == []
 
     holding = tmp_path / "plugin"
@@ -32,6 +32,28 @@ def test_a_kind_of_choice_with_nothing_to_choose_from(tmp_path: Path, plugin_roo
     (holding / "tools" / "features.json").write_text('[{"name": "guard"}]', encoding="utf-8")
     assert setup.available_profiles(holding) == ["one", "two"]
     assert setup.available_features(holding) == ["guard"]
+
+
+def test_a_directory_profile_reports_the_same_name_a_flat_one_did(plugin_root: Path) -> None:
+    """`fastapi` moved from `fastapi.md` to `fastapi/profile.md` (agent-teams, design.md
+    D1): a project that recorded `fastapi` still finds it on offer under that name."""
+    profiles = plugin_root / "tools" / "profiles"
+    assert (profiles / "fastapi" / "profile.md").is_file()
+    assert not (profiles / "fastapi.md").exists()
+    assert (profiles / "react.md").is_file(), "a flat profile is still a profile"
+    assert "fastapi" in setup.available_profiles(plugin_root)
+
+
+def test_flutter_is_on_offer_but_is_not_a_ui_profile(plugin_root: Path) -> None:
+    """`ui.json` means "Playwright applies", and it does not for Flutter (agent-teams,
+    design.md D6): the profile is on offer, and its `profile.md` says what evidence
+    `verify` reads instead, but it is left out of the registry so no Playwright entry is
+    ever proposed for it."""
+    assert "flutter" in setup.available_profiles(plugin_root)
+    assert "flutter" not in setup.ui_profiles(plugin_root)
+    assert setup.ui_profiles(plugin_root) == ["react"], "the registry itself is unchanged"
+    profile = plugin_root / "tools" / "profiles" / "flutter" / "profile.md"
+    assert "## Verification evidence" in profile.read_text(encoding="utf-8")
 
 
 def test_the_playwright_approval_is_per_run(plugin_root: Path, answers) -> None:

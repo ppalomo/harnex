@@ -56,7 +56,44 @@ who built the code, compute a binding, or read a journal or other run-time state
 Present its review exactly as it comes back — do not summarise away a finding, and do not
 revise the diff on its behalf. Whether to act on what it found is the person's call.
 
-## 4. Finish
+## 4. Start the project's own reviewers, once each
+
+The profiles a project chose may bring a team: stack reviewers rendered into the project's
+`.claude/agents/` by `setup` and `update`. After the core reviewer, each of them reads the
+same diff. Read the recorded profiles from the same source as step 1 — `.harnex/config.yml`
+if it exists, otherwise `.harnex.yml`, its `profiles` list. If neither exists, or the list
+is empty, skip this whole step: the review is exactly what it was before this capability
+existed, the core reviewer's review and nothing more.
+
+Otherwise ask the harness which agents this phase starts:
+
+```
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/render_agents.py" list --profiles <a,b> --phase review
+```
+
+It prints one line per agent: the agent's emoji, exactly one space, then its `name` —
+for example `🔐 <profile>-security-reviewer`. If it prints nothing, skip the rest of this
+step for the same reason as above. Never read an agent's body to find its emoji or name;
+the list is the only source for both.
+
+For each line, in the order printed, check that `.claude/agents/<name>.md` exists in the
+project. If it does not, tell the person that line, say the agent is missing from
+`.claude/agents/`, and name `/harnex:update` as the remedy, which renders it; then go on
+with the others. Never render or write the agent here.
+
+Start each agent that exists once — the `Agent` tool, `subagent_type: <name>` — with the
+same change directory and the same diff the core reviewer received in step 3, and with no
+`model` override: the fixed `model: opus` of step 3 belongs to the core reviewer alone.
+Start them in parallel where the host allows; they are independent and read-only.
+
+Present each review exactly as it comes back, after the core reviewer's review and in the
+list's order, each under a heading that is the list's own line for that agent — the emoji,
+one space, the `name`, nothing else. Never merge two reviews into one, never drop a
+finding because another reviewer reported it, and never summarise: a finding two
+reviewers both made is information, since two readers found it. Finish with the reviews
+you could obtain.
+
+## 5. Finish
 
 Tell the person the review is complete. This skill never writes anything, never blocks,
 never requires `verify` or `ship` to have run first, and never affects `ship`'s own gate.
@@ -66,4 +103,7 @@ never requires `verify` or `ship` to have run first, and never affects `ship`'s 
 - Write anything.
 - Block, or require another command to have run first.
 - Affect `ship`'s disagreement rule.
-- Call the reviewer more than once per run.
+- Call any reviewer, core or stack, more than once per run.
+- Merge, dedupe or summarise reviews: each is shown as returned, under its own label.
+- Render or write an agent; a missing one is reported, with `/harnex:update` as the remedy.
+- Override a stack reviewer's model; `model: opus` is the core reviewer's alone.

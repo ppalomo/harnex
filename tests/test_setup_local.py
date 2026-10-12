@@ -13,10 +13,11 @@ from pathlib import Path
 import pytest
 
 import apply_loop
+import render_agents
 import setup
 import update
 import verify_checks
-from conftest import commit_all, tree
+from conftest import FLAT_PROFILE, TEAM_PROFILE, commit_all, team_agent_paths, tree
 
 
 def _git(project: Path, *args: str) -> None:
@@ -1532,3 +1533,153 @@ def test_apply_passes_only_the_task_s_own_text_to_codex_under_shared_visibility(
 ) -> None:
     bullet = _apply_codex_bullet(plugin_root)
     assert "under `shared` visibility it is the task's own text and nothing else" in bullet
+
+
+# --- agent-teams: each rendered agent is excluded by its own path (design.md D3) ------
+
+
+def _tracked(project: Path) -> list[str]:
+    return subprocess.run(
+        ["git", "-C", str(project), "ls-files"], check=True, capture_output=True, text=True
+    ).stdout.splitlines()
+
+
+def test_each_rendered_agent_is_excluded_by_its_own_path_never_its_directory(
+    repo: Path, local_answers: dict, setup_run, team_plugin_root: Path
+) -> None:
+    local_answers["profiles"] = [TEAM_PROFILE]
+    code, _ = setup_run("write", repo, local_answers, plugin_root=team_plugin_root)
+    assert code == 0
+    paths = team_agent_paths()
+    lines = (repo / setup.GIT_EXCLUDE).read_text(encoding="utf-8").splitlines()
+    for path in paths:
+        assert (repo / path).is_file()
+        assert path in lines
+        assert _check_ignore(repo, path)
+    assert [line for line in lines if line.startswith(".claude/agents")] == paths, (
+        "each agent by its own path, and never the directory"
+    )
+    assert not _check_ignore(repo, ".claude/agents/own.md")
+    assert _status(repo) == ""
+    record = json.loads((repo / setup.MANIFEST).read_text(encoding="utf-8"))
+    assert set(paths) <= set(record["paths"])
+
+
+def test_the_project_s_own_agent_stays_tracked_beside_the_rendered_ones(
+    repo: Path, local_answers: dict, setup_run, team_plugin_root: Path
+) -> None:
+    own = repo / ".claude" / "agents" / "own.md"
+    own.parent.mkdir(parents=True)
+    own.write_text("# Mine\n", encoding="utf-8")
+    commit_all(repo)
+    local_answers["profiles"] = [TEAM_PROFILE]
+    code, said = setup_run("write", repo, local_answers, plugin_root=team_plugin_root)
+    assert code == 0, said
+    assert own.read_text(encoding="utf-8") == "# Mine\n"
+    assert "own.md" not in said
+    assert ".claude/agents/own.md" in _tracked(repo)
+    assert not _check_ignore(repo, ".claude/agents/own.md")
+    assert _status(repo) == "", "the rendered agents are excluded; own.md is as committed"
+
+
+def test_a_local_plan_lists_each_agent_and_a_flat_profile_none(
+    repo: Path, local_answers: dict, team_plugin_root: Path
+) -> None:
+    local_answers["profiles"] = [TEAM_PROFILE]
+    plan = _local_plan(repo, team_plugin_root, local_answers)
+    steps = [step for step in plan.steps if step.path.startswith(setup.AGENTS_DIR)]
+    assert [step.path for step in steps] == team_agent_paths()
+    for step in steps:
+        assert (step.owner, step.action) == ("harness", setup.CREATE)
+        assert TEAM_PROFILE in step.detail
+    exclude = _step(plan, setup.GIT_EXCLUDE)
+    assert exclude.data is not None
+    added = exclude.data.decode("utf-8").splitlines()
+    assert all(path in added for path in team_agent_paths())
+    assert ".claude/agents" not in added and ".claude/agents/" not in added
+
+    local_answers["profiles"] = [FLAT_PROFILE]
+    plan = _local_plan(repo, team_plugin_root, local_answers)
+    assert not any(step.path.startswith(setup.AGENTS_DIR) for step in plan.steps)
+    exclude = _step(plan, setup.GIT_EXCLUDE)
+    assert exclude.data is not None and setup.AGENTS_DIR not in exclude.data.decode("utf-8")
+
+
+def test_a_local_rerun_with_agents_is_nothing_to_do(
+    repo: Path, local_answers: dict, setup_run, team_plugin_root: Path
+) -> None:
+    local_answers["profiles"] = [TEAM_PROFILE]
+    code, _ = setup_run("write", repo, local_answers, plugin_root=team_plugin_root)
+    assert code == 0
+    assert _status(repo) == ""
+    plan = _local_plan(repo, team_plugin_root, _rerun(local_answers), commit=False)
+    assert not plan.conflicts
+    assert plan.nothing_to_do
+
+
+def test_a_hand_written_agent_is_a_conflict_under_local_visibility_until_adopted(
+    repo: Path, local_answers: dict, setup_run, team_plugin_root: Path
+) -> None:
+    local_answers["profiles"] = [TEAM_PROFILE]
+    first = team_agent_paths()[0]
+    (repo / first).parent.mkdir(parents=True)
+    (repo / first).write_text("# Mine\n", encoding="utf-8")
+    code, said = setup_run("write", repo, local_answers, plugin_root=team_plugin_root)
+    assert code == 1 and first in said and "approve its adoption" in said
+    assert (repo / first).read_text(encoding="utf-8") == "# Mine\n"
+
+    local_answers["approvals"]["adopt"] = [first]
+    code, _ = setup_run("write", repo, local_answers, plugin_root=team_plugin_root)
+    assert code == 0
+    rendered = render_agents.render([TEAM_PROFILE], team_plugin_root)
+    assert (repo / first).read_bytes() == rendered[first]
+
+
+def test_dropping_the_profile_under_local_removes_the_agents_and_keeps_their_exclude_entries(
+    repo: Path, local_answers: dict, setup_run, team_plugin_root: Path
+) -> None:
+    """The agents go and the record drops them; the exclude entries stay, like `.env`'s
+    (design.md D3): the list is the clone's, and a stale entry matches nothing — so the
+    project's own agent beside them is still tracked, and the tree still clean."""
+    own = repo / ".claude" / "agents" / "own.md"
+    own.parent.mkdir(parents=True)
+    own.write_text("# Mine\n", encoding="utf-8")
+    local_answers["profiles"] = [TEAM_PROFILE]
+    code, _ = setup_run("write", repo, local_answers, plugin_root=team_plugin_root)
+    assert code == 0
+    paths = team_agent_paths()
+    exclude_before = (repo / setup.GIT_EXCLUDE).read_text(encoding="utf-8")
+
+    rerun = _rerun(local_answers)
+    rerun["profiles"] = []
+    plan = _local_plan(repo, team_plugin_root, rerun, commit=False)
+    assert not plan.conflicts and not plan.nothing_to_do
+    assert [step.path for step in plan.removals] == paths
+    assert _step(plan, setup.GIT_EXCLUDE).action == setup.UNCHANGED
+
+    code, said = setup_run("write", repo, rerun, plugin_root=team_plugin_root)
+    assert code == 0, said
+    assert not any((repo / path).exists() for path in paths)
+    assert own.read_text(encoding="utf-8") == "# Mine\n"
+    assert ".claude/agents/own.md" in _tracked(repo)
+    assert (repo / setup.GIT_EXCLUDE).read_text(encoding="utf-8") == exclude_before
+    assert all(_check_ignore(repo, path) for path in paths), "a stale entry, left in place"
+    record = json.loads((repo / setup.MANIFEST).read_text(encoding="utf-8"))
+    assert not any(path in record["paths"] for path in paths)
+    assert _status(repo) == ""
+
+
+def test_an_edited_stale_agent_is_a_conflict_under_local_visibility(
+    repo: Path, local_answers: dict, setup_run, team_plugin_root: Path
+) -> None:
+    local_answers["profiles"] = [TEAM_PROFILE]
+    code, _ = setup_run("write", repo, local_answers, plugin_root=team_plugin_root)
+    assert code == 0
+    first, *rest = team_agent_paths()
+    (repo / first).write_text("edited by hand\n", encoding="utf-8")
+
+    rerun = _rerun(local_answers)
+    rerun["profiles"] = []
+    code, said = setup_run("write", repo, rerun, plugin_root=team_plugin_root)
+    assert code == 1 and first in said and "edited after the harness wrote it" in said
+    assert all((repo / path).is_file() for path in team_agent_paths()), "nothing is removed"

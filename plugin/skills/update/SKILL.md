@@ -6,10 +6,14 @@ description: Refresh a harnessed project's harness-owned paths and entries from 
 # Updating a project
 
 Update refreshes `.harnex/rules.md`, the permission-floor entries in `.claude/settings.json`,
-and the Playwright entry in `.mcp.json` if one is already there — from the choices the
-project already recorded in `.harnex.yml` when it ran `/harnex:setup`. It asks no question:
-every input the script needs is already recorded, so there is nothing for you to ask the
-person and nothing for you to decide on their behalf.
+the Playwright entry in `.mcp.json` if one is already there, and the rendered agents under
+`.claude/agents/` — from the choices the project already recorded in `.harnex.yml` when it
+ran `/harnex:setup`. Each rendered agent is rewritten when the harness's own role or
+profile fragment changed and left byte-stable otherwise; an agent the record lists that a
+dropped profile no longer renders is removed. It asks no question: every input the script
+needs is already recorded, so there is nothing for you to ask the person and nothing for
+you to decide on their behalf — the removal included, since everything in an update plan
+was already approved when the project ran setup.
 
 The script is at `${CLAUDE_PLUGIN_ROOT}/scripts/update.py`. Run it with `uv run`.
 
@@ -45,6 +49,8 @@ the ones you judge interesting:
   skipped, never created. Point to `/harnex:setup`.
 - **A Playwright entry not yet approved** — reported the same way, with what it would add;
   point to `/harnex:setup` for the approval.
+- **A `Removed:` line** — names each stale agent the run deleted, by path, because a
+  dropped profile no longer renders it; show it as printed, asking nothing.
 - **Nothing to do** — the project is already current; say so plainly, there is nothing else
   to report.
 
@@ -57,5 +63,6 @@ Two refusals write nothing at all:
 
 A conflict — a harness-owned file whose content matches neither the recorded fingerprint nor
 what the harness would write now, meaning it was edited by hand — also stops the run before
-anything is written. Name the file the script names, and point to `/harnex:setup`'s adoption,
-the same as any other conflict; update itself never adopts one.
+anything is written. A rendered agent, current or stale, is such a file: a conflict on an
+agent path stops the run like any other. Name the file the script names, and point to
+`/harnex:setup`'s adoption, the same as any other conflict; update itself never adopts one.

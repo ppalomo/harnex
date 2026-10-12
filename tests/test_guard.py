@@ -616,7 +616,7 @@ def _copy_guard_with_hanging_decide(plugin_root: Path, directory: Path) -> Path:
         "import time\ntime.sleep(60)\n", encoding="utf-8"
     )
     real_scripts = plugin_root / "scripts"
-    for name in ("setup.py", "render_rules.py"):
+    for name in ("setup.py", "render_rules.py", "render_agents.py"):
         shutil.copy2(real_scripts / name, scripts / name)
     return copied_guard / "guard.py"
 
