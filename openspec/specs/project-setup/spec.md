@@ -500,7 +500,11 @@ harness's own paths: `git status --porcelain` scoped to the project's directory
 parent repository do not count) SHALL report no path other than one
 setup itself writes or owns (`AGENTS.md`, `CLAUDE.md`, `.harnex.yml`, anything under
 `.harnex/`, `openspec/config.yaml`, `.claude/settings.json`, `.mcp.json`,
-`CLAUDE.local.md`, `.claude/settings.local.json`). No repository, a failing `git status`,
+`CLAUDE.local.md`, `.claude/settings.local.json`, and every rendered agent path
+`.claude/agents/<profile>-<specialist>.md` that the chosen profiles produce or that the
+generation record lists — so a stale agent awaiting removal never blocks the run that
+removes it — but not the directory `.claude/agents/` itself, since the project's own
+agents in it are the project's). No repository, a failing `git status`,
 or any other listed path SHALL be a conflict, reported alongside the rest of the plan like
 any other conflict — every path still appears in the plan — and stopping the run before
 any write. The conflict SHALL name what to do — create the repository and commit, or
@@ -536,6 +540,25 @@ conflict, reported alongside its full plan, remains the enforcement.
 - **THEN** the only uncommitted paths are the harness's own, the precondition holds, and
   the rerun plans nothing to do
 
+#### Scenario: A shared rerun with rendered agents uncommitted
+
+- **WHEN** a `shared` setup that chose a profile with a team has written its agents
+  under `.claude/agents/` and is run again before they are committed
+- **THEN** those agent paths count as the harness's own, the precondition holds, and
+  the rerun plans nothing to do
+
+#### Scenario: A stale agent before the run that removes it
+
+- **WHEN** a profile with a team was dropped from the choices, its agents are listed in
+  the record and still uncommitted, and setup runs again
+- **THEN** those paths count as the harness's own, the precondition holds, and the plan
+  removes them
+
+#### Scenario: The project's own agent is uncommitted
+
+- **WHEN** setup runs with an untracked `.claude/agents/own.md` that no profile renders
+- **THEN** that path is reported as a conflict like any other project path
+
 #### Scenario: An interrupted setup
 
 - **WHEN** setup was interrupted after some of its writes and is run again
@@ -552,3 +575,29 @@ conflict, reported alongside its full plan, remains the enforcement.
 
 - **WHEN** `update` runs on a project with uncommitted changes
 - **THEN** it is not refused on that account
+
+### Requirement: The plan includes the chosen profiles' agents
+
+For every chosen profile that has a team, setup's plan SHALL include one line per
+rendered agent under `.claude/agents/`, with the same outcomes as any other
+harness-owned path — create, unchanged, update, conflict or adopt — and one line per
+agent the record lists but the choices no longer produce, marked for removal or as a
+conflict. The choices setup offers SHALL say, for each profile, which specialists its team
+brings, so the person knows what choosing it imports.
+
+#### Scenario: A profile with a team is chosen
+
+- **WHEN** setup plans for a project that chose a profile with three specialists
+- **THEN** three `.claude/agents/` lines appear in the plan, one per agent, each with
+  its action, and the write produces those three files and records them
+
+#### Scenario: A profile without a team is chosen
+
+- **WHEN** setup plans for a project whose only chosen profile is a single-file profile
+- **THEN** no `.claude/agents/` line appears and nothing is written there
+
+#### Scenario: Under local visibility
+
+- **WHEN** setup plans for a `local` visibility project that chose a profile with a team
+- **THEN** each rendered agent is planned under `.claude/agents/` and its own path is
+  planned into `.git/info/exclude`, with no entry for the directory itself
