@@ -1,5 +1,5 @@
 """Agents and skills use the minimum frontmatter (`AGENTS.md`), a role states its name,
-description, tools and phase once in its own frontmatter, and a role's Claude Code adapter
+description, tools, phase and department once in its own frontmatter, and a role's Claude Code adapter
 is the rendering of that role by `render_agents.py sync`, even though the host gives an
 agent's body no way to import another file — so the correspondence is a check that
 `sync --check` is clean, not an assumption.
@@ -16,8 +16,11 @@ import render_agents
 
 AGENT_FIELDS = {"name", "description", "tools"}
 SKILL_FIELDS = {"name", "description"}
-ROLE_FIELDS = {"name", "description", "tools", "phase"}
+ROLE_FIELDS = {"name", "description", "tools", "phase", "department"}
 PHASES = {"apply", "propose", "review", "verify"}
+# The one project-of-harnex fact pinned here (design D4 of `agent-roster`): which roles
+# are design's. Every other role is engineering's.
+DESIGN_ROLES = {"designer", "accessibility-reviewer"}
 
 _FRONTMATTER = re.compile(r"\A---\n(.*?)\n---\n(.*)\Z", re.DOTALL)
 _FIELD = re.compile(r"^([a-z]+): *(.*)$")
@@ -56,6 +59,14 @@ def test_an_agent_has_exactly_the_minimum_frontmatter(path: Path) -> None:
         f"{path}: frontmatter is {sorted(fields)}, expected exactly {sorted(AGENT_FIELDS)}"
     )
     assert fields["name"] == path.stem
+
+
+@pytest.mark.parametrize("path", AGENT_FILES, ids=lambda p: p.stem)
+def test_an_adapter_carries_neither_phase_nor_department(path: Path) -> None:
+    fields, _ = _read(path)
+    assert "phase" not in fields and "department" not in fields, (
+        f"{path}: an adapter drops `phase` and `department`; it carries {sorted(fields)}"
+    )
 
 
 # The tools that let an agent write a file or run a command; a role that only reads
@@ -110,7 +121,7 @@ def test_there_is_at_least_one_role() -> None:
 
 
 @pytest.mark.parametrize("path", ROLE_FILES, ids=lambda p: p.stem)
-def test_a_role_has_exactly_the_four_fields(path: Path) -> None:
+def test_a_role_has_exactly_the_five_fields(path: Path) -> None:
     fields, _ = _read(path)
     assert set(fields) == ROLE_FIELDS, (
         f"{path}: frontmatter is {sorted(fields)}, expected exactly {sorted(ROLE_FIELDS)}"
@@ -124,6 +135,28 @@ def test_a_role_names_the_phase_it_serves(path: Path) -> None:
     assert fields["phase"] in PHASES, (
         f"{path}: phase is {fields['phase']!r}, expected one of {sorted(PHASES)}"
     )
+
+
+@pytest.mark.parametrize("path", ROLE_FILES, ids=lambda p: p.stem)
+def test_a_role_names_the_department_it_belongs_to(path: Path) -> None:
+    fields, _ = _read(path)
+    assert fields["department"] in render_agents.DEPARTMENTS, (
+        f"{path}: department is {fields['department']!r}, expected one of "
+        f"{list(render_agents.DEPARTMENTS)}"
+    )
+
+
+def test_the_design_roles_are_pinned() -> None:
+    """Every role carries a department; `designer` and `accessibility-reviewer` are
+    design's, and every other role is engineering's."""
+    departments = {path.stem: _read(path)[0]["department"] for path in ROLE_FILES}
+    assert DESIGN_ROLES <= set(departments), (
+        f"missing design role(s): {sorted(DESIGN_ROLES - set(departments))}"
+    )
+    assert {name for name, value in departments.items() if value == "design"} == DESIGN_ROLES
+    assert {
+        name for name, value in departments.items() if value == "engineering"
+    } == set(departments) - DESIGN_ROLES
 
 
 # The persona section every role opens its body with (design D7 of `agent-teams`): the

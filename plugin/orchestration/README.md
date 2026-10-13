@@ -11,6 +11,19 @@ The nervous system: who does what, in which order, and who decides.
 - **The decision questions** under `decisions/`: one typed question per file, each with
   its criteria, the small state it receives, its own rule on the returned probabilities,
   and what it does when the decision backend is unavailable.
+- **The roster** (`C11`): a project's `.harnex.yml` may record `team:` and `bench:`, two
+  flat lists of specialist names, stated together or not at all. The roster decides who is
+  on the team; a chosen stack profile only supplies fragments, what that stack adds to a
+  specialist the roster names. A name with no fragment among the chosen profiles is
+  rendered as the **generic agent**, `.claude/agents/<specialist>.md` — the role's own
+  adapter at a project path, with no stack section. `review` and `propose` start the
+  team's agents of their phase and never the bench's, which stay on disk for the person to
+  start by name. A project that records no roster keeps its profiles' fragments as its
+  team, as before. Only a `review`- or `propose`-phase role that does not ship as a plugin
+  agent can be named.
+- **The `department`** every role declares (`C11`), `engineering` or `design`: a fifth
+  frontmatter field, dropped from every rendered agent like `phase`. Setup's roster offer
+  groups the specialists by it; it decides nothing else.
 
 ## What does not
 
@@ -74,3 +87,6 @@ entries. Next: `C6` adds the update command in pillar 2, not here.
 
 `C8` — **delivered**: `version_bump.py` and the `/harnex:ship` extension that calls it
 to ask the version bump before shipping.
+
+`C11` — **delivered**: the roster's `team` and `bench`, the generic agent, and the
+`department` field on every role.

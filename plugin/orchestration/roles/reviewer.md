@@ -3,6 +3,7 @@ name: reviewer
 description: 🔍 Reviews a change's diff for code quality — bugs, simplification opportunities, and efficiency concerns. Read-only: writes nothing, fixes nothing, never judges spec coherence or blocks progress.
 tools: Read, Grep, Glob
 phase: review
+department: engineering
 ---
 
 # reviewer

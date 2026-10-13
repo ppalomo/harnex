@@ -43,7 +43,7 @@
 | **A shell guard** | Decides before any command runs: deterministic rules first, the decision model for the ambiguous rest, never a silent allow on its own error — backed by a permission floor in the project's settings for when the hook itself cannot run. |
 | **A canary** | If you want one: every answer must end with a word you choose. When it goes missing, that instruction was not followed — a cheap sign the rules may have dropped out of the context. |
 | **Rule sets** | Git, code, spec-driven work, safety, language — written once, rendered into each project, and enforced by hooks where they can be. |
-| **Agents with a name** | Five ship with the plugin — 💻 Savo the `builder`, 🔍 Almira the `reviewer`, 👀 Natalia the `verifier`, 🧪 Raul the `test-engineer`, 🐛 Dani the `debugger` — each with an emoji and a name so a listing and a review tell them apart. The `rails`, `fastapi` and `flutter` profiles each bring a team of stack specialists, rendered into your project's `.claude/agents/` and started by `review` and `propose`. |
+| **Agents with a name** | Five ship with the plugin — 💻 Savo the `builder`, 🔍 Almira the `reviewer`, 👀 Natalia the `verifier`, 🧪 Raul the `test-engineer`, 🐛 Dani the `debugger` — each with an emoji and a name so a listing and a review tell them apart. Your project names its stack specialists in a roster — a `team` that `review` and `propose` start and a `bench` you start by name — rendered into its `.claude/agents/`, each completed by what a chosen profile such as `rails` adds to it, or generic where none does. |
 
 ## 🧩 How it is organised
 

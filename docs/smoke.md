@@ -1074,3 +1074,187 @@ Python 3.13 through `uv`).
 - Step 11: every check passes. `sync --check` prints nothing and exits 0: every adapter
   under `plugin/agents/` is what its role renders, so the five core agents and the
   rendered specialists carry the same persona text as their roles.
+
+## agent-roster (C11)
+
+**Delivers:** a project that names its own specialists in `.harnex.yml` — a `team:` that
+`/harnex:review` and `/harnex:propose` start, and a `bench:` rendered into the project
+but started only by the person, by name — independently of the stack profiles it chose;
+a chosen profile supplying only what its stack adds to a named specialist; a named
+specialist with no fragment among the chosen profiles rendered as the generic agent,
+`.claude/agents/<specialist>.md`; `/harnex:update` following an edited roster or a
+dropped profile, asking nothing; and a project that records no roster behaving exactly
+as `C10` left it. Requires a fresh Claude Code session after installing this version of
+the plugin, for the same reason `C2` does.
+
+**Verified against:** every deterministic step (`render_agents.py`'s `render` and
+`list` with `--team` and `--bench`, `setup.py`'s roster reading, refusals and agent plan,
+`update.py`'s refresh) against `uv run --with pytest pytest`. The live walk below is this
+change's own "try it": record the versions it passes on here.
+
+**Steps**
+
+1. Install this version of the plugin, from a fresh session:
+   ```bash
+   claude plugin marketplace add ./
+   claude plugin install harnex@harnex
+   ```
+2. Make a scratch project, committed, and harness it with `rails` and **no roster**. A
+   first `/harnex:setup` now always records a roster, so this one project is set up from
+   the script, with an answers document that carries neither `team` nor `bench` — the
+   shape of every project set up before this change:
+   ```bash
+   mkdir -p /tmp/harnex-roster && cd /tmp/harnex-roster && git init -q -b main
+   git config user.email t@t.com && git config user.name t
+   printf '# roster\n' > README.md && git add -A && git commit -qm "first commit"
+   cd ~/Developer/harnex     # your checkout
+   cat > /tmp/harnex-roster.json <<'JSON'
+   {"project_name": "roster", "profiles": ["rails"], "sets": ["git", "sdd", "code"],
+    "features": [], "canary": "", "decision_model": "mock", "check_command": "make check",
+    "approvals": {"pointer_agents": true, "pointer_claude": true, "adopt": []}}
+   JSON
+   uv run plugin/scripts/setup.py plan --answers /tmp/harnex-roster.json --project /tmp/harnex-roster
+   uv run plugin/scripts/setup.py write --answers /tmp/harnex-roster.json --project /tmp/harnex-roster
+   cd /tmp/harnex-roster
+   grep -nE '^(team|bench):' .harnex.yml; ls .claude/agents
+   uv run ~/Developer/harnex/plugin/scripts/render_agents.py list --profiles rails --phase review
+   git add -A && git commit -qm "harnessed, no roster"
+   ```
+3. A small diff on a branch, the same one `C10` uses — a migration and a controller —
+   committed so the tree is clean for the updates to come, then `/harnex:review` in a
+   session opened in the project:
+   ```bash
+   git checkout -qb a-change
+   mkdir -p db/migrate app/controllers
+   cat > db/migrate/20260101000000_add_notes.rb <<'RB'
+   class AddNotes < ActiveRecord::Migration[7.1]
+     def change
+       create_table(:notes) { |t| t.string :body }
+       add_index :notes, :body
+     end
+   end
+   RB
+   cat > app/controllers/notes_controller.rb <<'RB'
+   class NotesController < ApplicationController
+     def index
+       render json: Note.where("body LIKE '%#{params[:q]}%'")
+     end
+   end
+   RB
+   git add -A && git commit -qm "a diff to review"
+   claude
+   ```
+   Run `/harnex:review` and note which reviews are shown.
+4. Record a roster: add these four lines to the end of `.harnex.yml` by hand — Penélope
+   (`security-reviewer`) on the team, Jame (`migration-reviewer`) on the bench, and
+   Gideon (`api-designer`) named nowhere — commit, and run `/harnex:update` in the session
+   (or, from your checkout, `uv run plugin/scripts/update.py --project /tmp/harnex-roster`,
+   which is what the command runs):
+   ```
+   team:
+     - security-reviewer
+   bench:
+     - migration-reviewer
+   ```
+   ```bash
+   git commit -qam "record a roster"
+   ```
+   After the update:
+   ```bash
+   ls .claude/agents
+   grep -o '"\.claude/agents/[^"]*"' .harnex/manifest.json
+   git status --short
+   git add -A && git commit -qm "roster applied"
+   ```
+5. Run `/harnex:review` again in the session, on the same diff. Then read the listing the
+   skill reads, from your checkout's script:
+   ```bash
+   uv run ~/Developer/harnex/plugin/scripts/render_agents.py list --profiles rails \
+     --team security-reviewer --bench migration-reviewer --phase review
+   ```
+6. Drop `rails` from the recorded choices by hand, keeping the roster, commit, and run
+   `/harnex:update` again:
+   ```bash
+   sed -i '' '/^  - rails$/d' .harnex.yml
+   git commit -qam "drop the rails profile"
+   ```
+   After the update:
+   ```bash
+   ls .claude/agents
+   H=~/Developer/harnex/plugin     # your checkout
+   uv run $H/scripts/render_agents.py render --profiles "" --team security-reviewer \
+     --bench migration-reviewer --out-dir /tmp/harnex-roster-generic
+   diff -r .claude/agents /tmp/harnex-roster-generic/.claude/agents
+   diff <(sed -n '/^## Who you are$/,$p' .claude/agents/security-reviewer.md) \
+        <(sed -n '/^## Who you are$/,$p' $H/orchestration/roles/security-reviewer.md)
+   head -5 .claude/agents/security-reviewer.md
+   grep -c '^## For this stack' .claude/agents/security-reviewer.md .claude/agents/migration-reviewer.md
+   git status --short
+   git add -A && git commit -qm "generic agents"
+   ```
+7. Run `/harnex:review` once more, on the same diff.
+8. A setup rerun and `/harnex:propose`. Add `api-designer` to the team by hand — the
+   `team:` list now reads `security-reviewer`, `api-designer` — commit, and run
+   `/harnex:setup` in the session: it is a rerun, so it asks nothing about the roster.
+   Approve the plan, commit, then run `/harnex:propose` with a one-line idea ("add a
+   notes search endpoint") and stop after `design.md` is written. Then move
+   `api-designer` to the bench, commit, run `/harnex:update`, and `/harnex:propose` once
+   more with another one-line idea.
+9. A roster the harness refuses. Add `builder` to the team by hand, commit, and run
+   `/harnex:update`; then put the file back with `git revert --no-edit HEAD`.
+10. A first setup's roster question, on a second scratch project, in a session: make
+    `/tmp/harnex-roster-2` the way step 2 made the first (committed `README.md`), open
+    `claude` in it, run `/harnex:setup`, choose `rails`, and **decline** the plan.
+11. Tidy up: `rm -rf /tmp/harnex-roster /tmp/harnex-roster-2 /tmp/harnex-roster.json /tmp/harnex-roster-generic`.
+
+**Expect**
+
+- Step 2: the plan has the three `C10` lines under `.claude/agents/` —
+  `rails-api-designer.md`, `rails-migration-reviewer.md`, `rails-security-reviewer.md` —
+  each `create`, detail `rendered for the rails profile's team`. The `grep` prints
+  nothing: no `team:` or `bench:` was written. `ls` shows exactly the three files, and
+  `list` prints `🧮 rails-migration-reviewer` and `🔐 rails-security-reviewer` — what
+  `C10` printed.
+- Step 3: three reviews, as in `C10`: the core reviewer's, then `🧮
+  rails-migration-reviewer`, then `🔐 rails-security-reviewer`. A project without a
+  roster behaves as it did before this change.
+- Step 4: update asks nothing. Its plan shows `rails-api-designer.md` as `remove`, and
+  the other two agents unchanged; the report names `.harnex/manifest.json` under
+  `Written:` and `.claude/agents/rails-api-designer.md` under `Removed:`. `ls` shows
+  `rails-migration-reviewer.md` and `rails-security-reviewer.md` only — Gideon is gone,
+  Penélope and Jame stay, each still prefixed, since `rails` holds a fragment for both.
+  The manifest lists the two paths; `git status` shows the one deletion and the manifest,
+  and `.harnex.yml` is not touched by the update.
+- Step 5: two reviews, not three: the core reviewer's, then `🔐 rails-security-reviewer`
+  — Penélope only. Jame is on disk and is not started. `list` prints the one line
+  `🔐 rails-security-reviewer`; the bench agent is not in it.
+- Step 6: update asks nothing. Its plan shows `rails-security-reviewer.md` and
+  `rails-migration-reviewer.md` as `remove`, and `security-reviewer.md` and
+  `migration-reviewer.md` as `create`, detail `named on the project's team` and `named on
+  the project's bench`. `ls` shows `migration-reviewer.md` and `security-reviewer.md`
+  only — the two prefixed agents became the generic ones. **Both `diff`s print nothing:**
+  what update wrote is what the renderer renders from the roster alone, and the body from
+  `## Who you are` on is the role's own, byte for byte. `head -5` shows the frontmatter
+  `name: security-reviewer`, the `🔐` description with no `— stack:` suffix, `tools:
+  Read, Grep, Glob`, no `phase` and no `department`. The `grep -c` prints `0` for both
+  files: no stack section. `git status` shows two deletions,
+  two new files and the manifest.
+- Step 7: two reviews: the core reviewer's, then one under `🔐 security-reviewer` — the
+  generic security reviewer only, with no stack heading in its prompt. The generic
+  `migration-reviewer` is on the bench and is not started. `review` wrote nothing.
+- Step 8: the setup rerun asks no roster question and its plan shows one line,
+  `.claude/agents/api-designer.md` as `create`, detail `named on the project's team` —
+  generic, since `rails` is no longer chosen — with everything else unchanged.
+  `/harnex:propose` consults `🔌 api-designer` once, before `design.md`, and `design.md`
+  names it where it uses its brief; the verifier still runs once at the end. After the
+  move to the bench, update changes no file — the agent's path and content stay the
+  same, so it reports nothing to do — and the second `/harnex:propose` consults nobody: `design.md` is written
+  from the proposal alone.
+- Step 9: update refuses before writing anything, with the renderer's own words —
+  `` `builder` cannot be on a roster: its phase is `apply` … The specialists held are:
+  … `` listing the five specialists. `git status` after the revert is clean.
+- Step 10: after the profiles, setup asks the roster question: every specialist the
+  harness holds, grouped under `engineering` (`🔌 api-designer`, `🧮
+  migration-reviewer`, `🔐 security-reviewer`) and `design` (`🦽 accessibility-reviewer`,
+  `🎨 designer`), each with its phase, proposing the three `rails` specialists as the team
+  and an empty bench. Declined, the plan writes nothing.

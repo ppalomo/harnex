@@ -93,3 +93,81 @@ def test_a_shape_outside_the_flat_one_is_a_read_error_not_a_crash(plugin_root: P
     with pytest.raises(setup.SetupError) as refusal:
         update.read_choices(malformed, plugin_root)
     assert "not `key: value`" in str(refusal.value)
+
+
+# --- the roster: two optional keys, present together or absent together (agent-roster D1)
+
+_SHARED = (
+    "project_name: scratch\n"
+    "profiles:\n"
+    "  - fastapi\n"
+    "sets:\n"
+    "  - code\n"
+    "features:\n"
+    "canary: \"\"\n"
+    "decision_model: mock\n"
+    "check_command: make check\n"
+)
+_LOCAL = _SHARED + "visibility: local\ntools:\nstore_id: scratch-store\n"
+_READERS = {
+    "shared": (update.read_choices, _SHARED, setup.CHOICES),
+    "local": (update.read_local_choices, _LOCAL, setup.LOCAL_CHOICES),
+}
+
+
+@pytest.mark.parametrize("shape", sorted(_READERS))
+def test_a_choices_file_without_a_roster_reads_as_none_recorded(
+    plugin_root: Path, shape: str
+) -> None:
+    reader, text, _ = _READERS[shape]
+    answers = reader(text, plugin_root)
+    assert answers.roster_recorded is False
+    assert answers.team == ()
+    assert answers.bench == ()
+
+
+@pytest.mark.parametrize("shape", sorted(_READERS))
+def test_a_choices_file_with_both_roster_keys_reads_both_lists(
+    plugin_root: Path, shape: str
+) -> None:
+    reader, text, _ = _READERS[shape]
+    roster = "team:\n  - security-reviewer\n  - designer\nbench:\n  - api-designer\n"
+    answers = reader(text + roster, plugin_root)
+    assert answers.roster_recorded is True
+    assert answers.team == ("security-reviewer", "designer")
+    assert answers.bench == ("api-designer",)
+
+
+@pytest.mark.parametrize("shape", sorted(_READERS))
+def test_a_choices_file_with_both_roster_keys_empty_records_nobody(
+    plugin_root: Path, shape: str
+) -> None:
+    reader, text, _ = _READERS[shape]
+    answers = reader(text + "team:\nbench:\n", plugin_root)
+    assert answers.roster_recorded is True
+    assert answers.team == ()
+    assert answers.bench == ()
+
+
+@pytest.mark.parametrize("shape", sorted(_READERS))
+@pytest.mark.parametrize("present, absent", [("team", "bench"), ("bench", "team")])
+def test_a_choices_file_with_one_roster_key_is_refused_naming_the_other(
+    plugin_root: Path, shape: str, present: str, absent: str
+) -> None:
+    reader, text, path = _READERS[shape]
+    with pytest.raises(setup.SetupError) as refusal:
+        reader(text + f"{present}:\n  - security-reviewer\n", plugin_root)
+    message = str(refusal.value)
+    assert path in message
+    assert f"`{absent}`" in message
+
+
+@pytest.mark.parametrize("shape", sorted(_READERS))
+def test_an_unknown_profile_is_still_refused_when_a_roster_is_recorded(
+    plugin_root: Path, shape: str
+) -> None:
+    reader, text, _ = _READERS[shape]
+    faulty = text.replace("  - fastapi\n", "  - nowhere\n") + "team:\nbench:\n"
+    with pytest.raises(setup.SetupError) as refusal:
+        reader(faulty, plugin_root)
+    assert "no such profile" in str(refusal.value)

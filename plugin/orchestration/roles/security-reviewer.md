@@ -3,6 +3,7 @@ name: security-reviewer
 description: 🔐 Reviews a change's diff for security findings — injection, authentication and authorisation gaps, secrets, unsafe deserialisation, dependency risk — each with a concrete exploit scenario. Read-only: writes nothing, fixes nothing, never blocks progress.
 tools: Read, Grep, Glob
 phase: review
+department: engineering
 ---
 
 # security-reviewer

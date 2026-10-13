@@ -122,8 +122,10 @@ joined in the **core team** (six roles, five of them prompts) by `test-engineer`
 `debugger`, shipped as plugin agents like the three before them but,
 in this version, started by the person by name: no skill calls either, and
 `test-engineer` is held by instruction only. Five **stack specialists** never ship as
-plugin agents: each is rendered into a project from a profile's team (§5, §6), read-only
-by its `tools`, and started by `review` or `propose`. Prompts are tool-agnostic and
+plugin agents: each is rendered into a project when the project's roster names it — or,
+for a project that records no roster, from a chosen profile's team (§5, §6) — read-only
+by its `tools`, and started by `review` or `propose`. Every role declares a
+`department`, `engineering` or `design` (`C11`). Prompts are tool-agnostic and
 follow one skeleton (see the study): the body opens with the role's defining paragraph,
 then a `## Who you are` section of at most five lines — one emoji, one bold given name,
 and up to three traits drawn from the role's own constraints, never a claim of
@@ -132,26 +134,53 @@ within decision 9's minimum frontmatter. The plugin's own adapters under `agents
 rendered from the roles by `render_agents.py sync`, never hand-edited. The orchestrator
 is you plus the commands.
 
-| Role | Who | Player | May write | Must refuse | Commands |
-|---|---|---|---|---|---|
-| `architect` | — | Claude, main session (`opus`; `fable` for hard designs) | the change's artifacts | source, tests, commits | explore, propose |
-| `builder` | 💻 Savo | Codex via the plugin; Claude subagent as fallback | source and tests within the task's declared paths | ticking `tasks.md`, committing, editing specs, widening scope | apply |
-| `verifier` | 👀 Natalia | Claude subagent, fresh context, read-only | nothing | fixing, committing, reopening settled decisions | propose (design review), verify |
-| `reviewer` | 🔍 Almira | Claude subagent, fixed on `opus`, read-only | nothing | fixing, committing, judging spec coherence (the verifier's job) | review |
-| `test-engineer` | 🧪 Raul | Claude subagent, core team (`C10`) | tests only, where the project keeps them | production code, weakening a test to pass, ticking `tasks.md`, committing | by name — phase `apply`; no skill starts it in this version |
-| `debugger` | 🐛 Dani | Claude subagent, read-only, core team (`C10`) | nothing | fixing, committing, presenting a hypothesis as a diagnosis | by name — phase `review`; no skill starts it in this version |
-| `security-reviewer` | 🔐 Penélope | Claude subagent, read-only, rendered per profile (`C10`) | nothing | fixing, committing, printing a secret it finds, blocking | review |
-| `migration-reviewer` | 🧮 Jame | Claude subagent, read-only, rendered per profile (`C10`) | nothing | fixing, committing, running a migration, judging the application code (the reviewer's job) | review |
-| `accessibility-reviewer` | 🦽 Ana | Claude subagent, read-only, rendered per profile (`C10`) | nothing | fixing, committing, running the application, redesigning | review |
-| `api-designer` | 🔌 Gideon | Claude subagent, read-only, rendered per profile (`C10`) | nothing — its brief is the architect's input to `design.md` | writing an artifact, deciding what the proposal left open, naming a technology the project has not chosen | propose |
-| `designer` | 🎨 Ines | Claude subagent, read-only, rendered per profile (`C10`) | nothing — its brief is the architect's input to `design.md` | writing an artifact, deciding what the proposal left open | propose |
+| Role | Who | Department | Player | May write | Must refuse | Commands |
+|---|---|---|---|---|---|---|
+| `architect` | — | — (no prompt) | Claude, main session (`opus`; `fable` for hard designs) | the change's artifacts | source, tests, commits | explore, propose |
+| `builder` | 💻 Savo | engineering | Codex via the plugin; Claude subagent as fallback | source and tests within the task's declared paths | ticking `tasks.md`, committing, editing specs, widening scope | apply |
+| `verifier` | 👀 Natalia | engineering | Claude subagent, fresh context, read-only | nothing | fixing, committing, reopening settled decisions | propose (design review), verify |
+| `reviewer` | 🔍 Almira | engineering | Claude subagent, fixed on `opus`, read-only | nothing | fixing, committing, judging spec coherence (the verifier's job) | review |
+| `test-engineer` | 🧪 Raul | engineering | Claude subagent, core team (`C10`) | tests only, where the project keeps them | production code, weakening a test to pass, ticking `tasks.md`, committing | by name — phase `apply`; no skill starts it in this version |
+| `debugger` | 🐛 Dani | engineering | Claude subagent, read-only, core team (`C10`) | nothing | fixing, committing, presenting a hypothesis as a diagnosis | by name — phase `review`; no skill starts it in this version |
+| `security-reviewer` | 🔐 Penélope | engineering | Claude subagent, read-only, rendered per project (`C10`; from the roster since `C11`) | nothing | fixing, committing, printing a secret it finds, blocking | review |
+| `migration-reviewer` | 🧮 Jame | engineering | Claude subagent, read-only, rendered per project (`C10`; from the roster since `C11`) | nothing | fixing, committing, running a migration, judging the application code (the reviewer's job) | review |
+| `accessibility-reviewer` | 🦽 Ana | design | Claude subagent, read-only, rendered per project (`C10`; from the roster since `C11`) | nothing | fixing, committing, running the application, redesigning | review |
+| `api-designer` | 🔌 Gideon | engineering | Claude subagent, read-only, rendered per project (`C10`; from the roster since `C11`) | nothing — its brief is the architect's input to `design.md` | writing an artifact, deciding what the proposal left open, naming a technology the project has not chosen | propose |
+| `designer` | 🎨 Ines | design | Claude subagent, read-only, rendered per project (`C10`; from the roster since `C11`) | nothing — its brief is the architect's input to `design.md` | writing an artifact, deciding what the proposal left open | propose |
 
-A profile's team is the set of fragments in its directory, one per specialist: `rails`
-and `fastapi` carry `security-reviewer`, `migration-reviewer` and `api-designer`;
-`flutter` carries `designer`, `accessibility-reviewer` and `security-reviewer`; a flat
-profile has no team. Only a `review`- or `propose`-phase role may receive a fragment, so
-every rendered agent is read-only. UI design is the `designer` advisor a profile's team
-may bring into `propose` (`C10`; `flutter` does, `react` has no team): the architect
+A profile's fragments are what its stack adds to a specialist, one file per specialist
+in its directory: `rails` and `fastapi` carry `security-reviewer`, `migration-reviewer`
+and `api-designer`; `flutter` carries `designer`, `accessibility-reviewer` and
+`security-reviewer`; a flat profile has none. Only a `review`- or `propose`-phase role
+may receive a fragment, and a fragment for a role that ships as a plugin agent is refused
+(`C11`), so every rendered agent is read-only. For a project that records no roster, a
+chosen profile's fragments are its team, as `C10` built it.
+
+**The roster (`C11`).** Who is on a project's team is the project's own choice,
+independent of its stacks: two flat lists in its choices file, `team:` and `bench:`, each
+naming specialists. A name on the team is rendered into the project and started by the
+skill of its role's phase; a name on the bench is rendered the same way but started only
+by the person, by name — the listing a skill asks for (`render_agents.py list --team
+--bench`) never prints it. For each name, every chosen profile holding a fragment for it
+yields `.claude/agents/<profile>-<specialist>.md`, and a name no chosen profile holds a
+fragment for yields the **generic agent**, `.claude/agents/<specialist>.md`: the role's
+own adapter, the role minus `phase` and `department`, with no stack section. A chosen
+profile's fragment for a name off the roster renders nothing, though it is still read and
+checked. The two keys are present together or absent together: absent, the chosen
+profiles' fragments decide the team exactly as in `C10`; present, the roster is exactly
+what they say, and both empty is an explicit "nobody". A roster name must be one of the
+specialists the harness holds — a `review`- or `propose`-phase role that does not ship as
+a plugin agent — so an unknown name, a name in both lists, one of the five core names and
+any `apply`- or `verify`-phase role are refused, by setup, by update and by `list` alike,
+with one message (`roster_refusal()`) that lists the specialists held. A first setup asks
+for the roster once, offering every specialist grouped by `department` and proposing the
+chosen profiles' specialists as the team with an empty bench; a project whose choices are
+recorded is never asked, and edits its own file instead. The department groups that offer
+and gates nothing: `designer` and `accessibility-reviewer` are `design`, every other role
+`engineering`.
+
+UI design is the `designer` advisor a project's team may bring into `propose` (`C10`; a
+roster names it, or `flutter`'s fragments do without one; `react` has none): the architect
 folds its brief into `design.md`, the builder builds it, the verifier checks it. Independence comes from **context
 separation**: the verifier never shares a context with the builder. Commits happen only
 in `ship`, after your explicit yes.
@@ -186,11 +215,11 @@ its own sandbox.
 
 The roles `C10` added bring one new mechanism each, and no cell above moves:
 
-| Rule | `test-engineer` | `debugger` | stack specialist, rendered |
+| Rule | `test-engineer` | `debugger` | stack specialist, rendered (prefixed or generic) |
 |---|---|---|---|
-| write only what the role may write | I only: tests, never production code — nothing stops it in this version, exactly as the builder outside the loop | I · P: `tools` has no `Edit`, `Write` or `Bash` | I · P: the role's `tools`, copied verbatim into the rendered agent · P: the renderer refuses a fragment for an `apply`- or `verify`-phase role, so no rendered agent can write |
+| write only what the role may write | I only: tests, never production code — nothing stops it in this version, exactly as the builder outside the loop | I · P: `tools` has no `Edit`, `Write` or `Bash` | I · P: the role's `tools`, copied verbatim into the rendered agent · P: the renderer refuses a fragment for an `apply`- or `verify`-phase role, so no rendered agent can write · P: a generic agent (`C11`) has no fragment; it is held read-only by the roster's refusal of any phase but `review` and `propose`, in setup, update and the renderer alike, so only a read-only role's `tools` can reach a project path |
 | never tick `tasks.md`, never edit specs; commit only in `ship` | I · P: guard asks, floor asks | P: as above | P: as above |
-| the prompt is the role's own | D: `render_agents.py sync --check`, run by the test suite — an edited role or a hand-edited adapter fails it | D: same check | D: the manifest's hash; `update` rewrites on drift, and a file at a rendered path the harness did not write is a conflict |
+| the prompt is the role's own | D: `render_agents.py sync --check`, run by the test suite — an edited role or a hand-edited adapter fails it | D: same check | D: the manifest's hash, for a prefixed and a generic agent alike; `update` rewrites on drift, and a file at a rendered path the harness did not write is a conflict |
 
 **What v0.1 honestly offers:** the builder's boundaries are instruction plus
 deterministic detection before acceptance; prevention exists where Claude Code's
@@ -261,7 +290,7 @@ either visibility (`C9`). The harness's own paths are the ones setup writes or o
 (`AGENTS.md`, `CLAUDE.md`, `.harnex.yml`, `.harnex/`, `openspec/config.yaml`,
 `.claude/settings.json`, `.mcp.json`, `CLAUDE.local.md`, `.claude/settings.local.json`,
 and each rendered agent path under `.claude/agents/` — the path, never the directory —
-since `C10`), so a rerun before the first commit, or after an interrupted run, still
+since `C10`, prefixed or generic since `C11`), so a rerun before the first commit, or after an interrupted run, still
 goes ahead. The
 repository is found with `git rev-parse`, so a worktree and a project in a subdirectory
 of a repository both work; a subdirectory's status is scoped to its own subtree. Anything
@@ -271,19 +300,21 @@ its first question. Setup never runs `git init`, commits or stashes to get past 
 untracked `.env` counts, so a project keeping its key there excludes it (in its own
 `.gitignore` or the repository's exclude list) before running setup. `update` is exempt:
 it refreshes harness-owned paths only and asks nothing. It asks for
-profiles, rule sets, features, canary word and decision backend, and brings the project to
+profiles, the roster (on a first setup only, `C11`), rule sets, features, canary word and
+decision backend, and brings the project to
 this state:
 
 | Path | Owner | Committed | Notes |
 |---|---|---|---|
 | `AGENTS.md` | **project** | yes | created from a template only if missing; afterwards only you change it |
 | `CLAUDE.md` | **project** | yes | created only if missing, with `@AGENTS.md` and `@.harnex/rules.md`; afterwards only you change it |
-| `.harnex.yml` | **project** | yes | your answers: `project_name`, `profiles`, `sets`, `features`, `canary`, `decision_model`, `check_command` |
+| `.harnex.yml` | **project** | yes | your answers: `project_name`, `profiles`, `sets`, `features`, `canary`, `decision_model`, `check_command`; and, optional and present together, `team` and `bench` (`C11`), written last — absent, the chosen profiles decide the team as in `C10`; both empty, nobody. A first setup always records them; setup never adds them to a file that exists, and update never writes the file |
 | `.harnex/rules.md` | harness | yes | rendered from the sets chosen |
 | `.harnex/manifest.json` | harness | yes | generation metadata: every harness-owned path and entry, with its hash |
 | `.claude/settings.json` | **shared, by entry** | yes | the harness owns the permission-floor entries it wrote, listed in the manifest; every other entry is yours |
 | `.mcp.json` | **shared, by entry** | yes | the harness owns the Playwright MCP entry it writes (for a UI profile, on explicit yes), listed in the manifest; every other entry is yours |
-| `.claude/agents/<profile>-<specialist>.md` | harness | yes | one per fragment of each chosen profile's team (`C10`): the role's prompt plus the stack's fragment, rendered by `render_agents.py`, written after the yes, refreshed by update asking nothing, and removed when its profile is dropped — each only while its hash still matches the manifest; a file at a rendered path the harness did not write is a conflict. The project's own agents in the same directory are never read, written or removed |
+| `.claude/agents/<profile>-<specialist>.md` | harness | yes | one per roster name and chosen profile holding a fragment for it (`C11`), or, with no roster, one per fragment of each chosen profile's team (`C10`): the role's prompt plus the stack's fragment, rendered by `render_agents.py`, written after the yes, refreshed by update asking nothing, and removed when its profile is dropped — each only while its hash still matches the manifest; a file at a rendered path the harness did not write is a conflict. The project's own agents in the same directory are never read, written or removed |
+| `.claude/agents/<specialist>.md` | harness | yes | the generic agent (`C11`): one per roster name that no chosen profile holds a fragment for — the role's own adapter, byte for byte, at a project path. Same ownership by hash, refresh, removal and conflict outcomes as a prefixed agent; a dropped profile turns its prefixed agent into the generic one on the next run, and a name dropped from the roster takes its agent with it |
 | `openspec/config.yaml` | **project** | yes | created only if missing, with the harness's artifact rules; afterwards only you change it |
 | `.harnex/state/` | runtime | no | decision journal and apply run state; ignored by a `.gitignore` inside the directory itself, so the project's own `.gitignore` is never touched |
 | `.git/info/exclude` | **this clone** | no | only when `decision_model` is `jev`: one `.env` entry in the repository's own exclude list (resolved with `git rev-parse`, so a worktree's or a parent repository's), added whether or not `.env` exists yet, so the key the `jev` backend falls back to never reaches a commit from this clone (`C9`); it protects this clone only — every other clone has its own exclude list. `.env` itself and the project's own `.gitignore` are never read or written |
@@ -297,9 +328,9 @@ project is not being adopted by a team, only used by the person running it. Unde
 |---|---|---|---|
 | `AGENTS.md`, `CLAUDE.md`, `openspec/config.yaml`, `.claude/settings.json`, `.mcp.json` | **project** | — | never read for insertion, never written; exactly as they were before setup ran |
 | `CLAUDE.local.md` | harness | no | one `@.harnex/rules.md` import; excluded via `.git/info/exclude`, never the project's own `.gitignore` |
-| `.claude/agents/<profile>-<specialist>.md` | harness | no | the same rendered agents as under `shared` (`C10`), each excluded by its own path in `.git/info/exclude`, so the project's own agents alongside are untouched |
-| `.git/info/exclude` | **local** | no | lists `CLAUDE.local.md` and `.claude/settings.local.json`, plus `.env` when `decision_model` is `jev` (`C9`), plus each rendered agent path (`C10`); `.env` itself is never read or written. The file is the repository's own, resolved with `git rev-parse --git-path info/exclude` — a worktree's common one, a parent repository's for a project in a subdirectory, whose entries are then anchored to the project's own prefix. The repository is always there already: setup requires one and never creates it (`C9`) |
-| `.harnex/config.yml` | **project** | no | your answers, `.harnex.yml`'s own ten-key local cousin — a new path, not a rename; `.harnex.yml` itself is untouched |
+| `.claude/agents/<profile>-<specialist>.md`, `.claude/agents/<specialist>.md` | harness | no | the same rendered agents as under `shared` (`C10`), generic ones included (`C11`), each excluded by its own path in `.git/info/exclude`, so the project's own agents alongside are untouched |
+| `.git/info/exclude` | **local** | no | lists `CLAUDE.local.md` and `.claude/settings.local.json`, plus `.env` when `decision_model` is `jev` (`C9`), plus each rendered agent path (`C10`), generic ones included (`C11`); `.env` itself is never read or written. The file is the repository's own, resolved with `git rev-parse --git-path info/exclude` — a worktree's common one, a parent repository's for a project in a subdirectory, whose entries are then anchored to the project's own prefix. The repository is always there already: setup requires one and never creates it (`C9`) |
+| `.harnex/config.yml` | **project** | no | your answers, `.harnex.yml`'s own ten-key local cousin — a new path, not a rename; `.harnex.yml` itself is untouched — plus the same two optional keys, `team` and `bench` (`C11`), written last, after `store_id` |
 | `.harnex/rules.md`, `.harnex/manifest.json`, `.harnex/state/` | harness / runtime | no | the whole of `.harnex/` ignores itself, not only `state/` |
 | `.claude/settings.local.json` | **local, by entry** | no | the permission floor's entries, Claude Code's own personal/gitignored settings layer |
 | an OpenSpec store | — | no | registered on the machine (`openspec store setup <id> --path <path>`), not a directory inside the project at all; the path is the person's own answer — setup asks it on a first local setup and proposes none, never adopting the tool's own `~/openspec/<id>` suggestion — and the registration is a line of the plan, run only after the yes to it (`C9`); a rerun reuses the recorded `store_id` and asks no path; `propose`/`apply`/`verify`/`ship` resolve `--store` from `.harnex/config.yml`'s `store_id` (`explore`/`review` never touch `openspec` at all) |
@@ -1069,7 +1100,93 @@ enforces itself. Each is its own OpenSpec change, in this order.
   before the commit counts them as a dirty tree and refuses; the smoke section commits
   first, and closing the gap is its own change.
 
-Later, not scheduled: tuning thresholds from the journal's resolutions; a Codex-side guard
+### C11 · agent roster — **code delivered, manual try owed**, change `agent-roster`
+
+- **Delivers:** a project names its own specialists, independently of its stacks. Its
+  choices file — `.harnex.yml`, or `.harnex/config.yml` under `local` — may carry two
+  optional flat lists, `team:` and `bench:`, present together or absent together
+  (`ROSTER_KEYS` in `setup.py`, read by one `read_roster`; absent is distinct from empty,
+  and the two are written last in either shape). Every role gains a fifth frontmatter
+  field, `department` — `design` for `designer` and `accessibility-reviewer`,
+  `engineering` for the other eight — dropped from a rendered agent like `phase`, with
+  `DEPARTMENTS` the renderer's tuple of allowed values. `render_agents.py` gains
+  `held_specialists()` — every `review`- or `propose`-phase role that does not ship as a
+  plugin agent, with department, emoji and phase — and a roster walk: per name, one
+  `<profile>-<specialist>` agent per chosen profile holding a fragment for it, or, with
+  none, the generic agent at `.claude/agents/<specialist>.md`, the role's own adapter;
+  without a roster the walk is `C10`'s. A roster name outside `held_specialists()`, or in
+  both lists, is refused with one message from `roster_refusal()` that lists the
+  specialists held, by setup's validation, by update and by `list` alike; a fragment for a
+  role that ships as a plugin agent is refused, roster or not. `render` and `list` take
+  `--team`/`--bench`, given together, and `list` accepts an empty `--profiles`, so a
+  roster with no profile still lists its generic agents; `list` prints team agents only,
+  never the bench. Setup's plan follows the roster ("named on the project's team" or
+  "…bench"), and `choices` prints `specialists` grouped by department beside `teams`. The
+  setup skill asks for the roster once, on a first setup, proposing the chosen profiles'
+  specialists as the team and an empty bench, and never asks a project that has already
+  answered; `review` and `propose` pass the recorded roster to `list` and start the team,
+  never the bench; `update` re-renders from the recorded roster and profiles, asking
+  nothing, and never adds a roster to the file. This change revises decisions 1, 4 and
+  11 (§12); 15 and 16 hold, since the reader is still the standard library's and the
+  agents are still a pure function of the choices, roster included.
+- **You try it:** on a committed scratch project set up with `rails` and no roster,
+  everything behaves as `C10`: three prefixed agents, and `/harnex:review` starts both
+  stack reviewers. Add the block lists `team:` / `  - security-reviewer` and `bench:` /
+  `  - migration-reviewer` (four lines; the flat reader takes no `[…]` form) to
+  `.harnex.yml` and run `/harnex:update`: `rails-api-designer.md` goes, the other two
+  stay, and `/harnex:review` starts 🔐 `rails-security-reviewer` only. Drop `rails` and
+  run `/harnex:update` again: the two prefixed agents become the generic
+  `security-reviewer.md` and `migration-reviewer.md`, and `/harnex:review` starts the
+  generic security reviewer only. Name `builder` on the team: setup and update refuse
+  with the message listing the specialists held, and write nothing. Full steps,
+  the refusal, a setup rerun, `/harnex:propose` and a first setup's roster question
+  included, in `docs/smoke.md`'s own "agent-roster (C11)" section.
+- **Tests:** every role's five fields, `department` among `DEPARTMENTS` and the two
+  `design` roles pinned, and the adapters carrying neither `phase` nor `department`;
+  `held_specialists()` against the shipped plugin; the roster walk — the generic agent
+  byte-equal to the role's adapter, a prefixed agent when one profile holds a fragment and
+  two when two do, a fragment off the roster rendering nothing while an invalid one is
+  still refused, a fragment for a plugin-shipped role refused with or without a roster,
+  both lists empty rendering nothing, byte-stability under roster order, a bench agent on
+  disk and absent from `agents_for`, and `C10`'s output unchanged without a roster; `list`
+  with and without `--team`/`--bench`, one alone refused, and an empty `--profiles`; both
+  choices shapes read without, with, with one of and with both empty roster keys, and
+  round-tripped with the roster last; each refusal of a roster name by message, through
+  setup and through `update`; the agent plan, write, removal, `local` exclusion and
+  conflict for a generic path; `choices`'s `specialists`; the `setup`, `update`, `review`
+  and `propose` skills' wording and the two template snapshots.
+- **What it taught:** two rules this change added broke tests written earlier in the same
+  change. Refusing a fragment for a role that ships as a plugin agent broke the shared
+  test fixture's `reviewer` fragment, which became `migration-reviewer`; validating a
+  recorded roster broke task 2.1's reader tests, whose roster named core and
+  `verify`-phase roles and switched to held specialists. In each case the architect
+  widened the task's declared paths to fix the earlier tests, rather than the builder
+  reaching past them: a new refusal has to be read against the fixtures already written,
+  not only against the code it guards.
+- **Exit:** the proposal's criterion — a harnessed project can name, in its own choices
+  file, which specialists it has, a `team` its phase skills start and a `bench` it starts
+  by name, independently of which stack profiles it chose; a specialist named without a
+  matching fragment is rendered in its generic form; a project that records no roster
+  behaves exactly as `C10` left it; `/harnex:review` and `/harnex:propose` start the team
+  and never the bench; every role declares a `department`, `engineering` or `design`,
+  which setup's offer groups the specialists by; and a profile dropped or a roster edited
+  takes effect on the next `setup` or `update` run — all tried by hand on a scratch
+  project, with every rule the plugin already enforces still holding. **Outcome:** the
+  code is delivered and its checks pass; the manual try is owed. On 2026-10-13, against
+  Claude Code 2.1.287, OpenSpec 1.11.0 and Python 3.13.5 through `uv` 0.12.13, each
+  command exiting zero: `uv run --with pytest pytest` (868 passed, 8 skipped — the four
+  skips of the personal denylist half and the four of the read-only check on the two
+  `apply` roles, none of them the manifest check), both `claude plugin validate --strict`
+  calls and `openspec validate --all` (19 of 19) pass, and
+  `uv run plugin/scripts/render_agents.py sync --check` is silent. The walk of
+  `docs/smoke.md`'s "agent-roster (C11)" section on a scratch project has not been done
+  yet; until the owner walks it, the criterion is not claimed as tried by hand. The owner
+  decided on 2026-10-13 to ship C11 with that walk owed, as `C9` shipped: the code, its
+  tests and the verifier's review stand, and the walk is the open item C11 carries.
+
+Next change: `triggers` — which team reviewer reads a given diff, with its own question of
+where a stack's paths are declared — together with a `/harnex:team` command listing a
+project's team and bench by department. Later, not scheduled: tuning thresholds from the journal's resolutions; a Codex-side guard
 hook; a team for a further stack (a profile directory and its fragments, no code);
 pairing `test-engineer` with the builder inside the apply loop and giving `debugger` a
 place in `apply`'s escalation; promoting a `local` setup to `shared`. Never: an
@@ -1077,17 +1194,17 @@ unattended mode.
 
 ## 12. Decisions taken
 
-1. Organised by the five pillars; placement by topic; stacks are profiles, and a profile may declare a team: its directory's fragments, one per specialist role (`C10`).
+1. Organised by the five pillars; placement by topic; stacks are profiles, and a profile may declare fragments: its directory's files, one per specialist role (`C10`). For a project that records no roster they are the profile's team; under a roster they are only what that stack adds to a specialist the roster names (`C11`).
 2. Claude Code is the only cockpit. Codex is reached through its official plugin only.
 3. Delivery is a Claude Code plugin for behaviour plus a handful of small files per project (§6). Ownership is by file, with a committed hash manifest; the one exception, `.claude/settings.json`, is owned by entry. Copier and the old marketplace are dropped.
-4. Eleven roles (`C10`; three when first written, four since `C5`), ten of them prompts under `orchestration/roles/` — the architect is the main session and has none: architect, builder, verifier, reviewer, test-engineer, debugger, and five stack specialists — security-reviewer, migration-reviewer, accessibility-reviewer, api-designer, designer — rendered per project from a profile's team. The three write boundaries are fixed whatever the count: a role writes source (builder, and test-engineer for tests alone), writes the change's artifacts (architect), or reads only (every other). The orchestrator is the human. Commits only in `ship`.
+4. Eleven roles (`C10`; three when first written, four since `C5`), ten of them prompts under `orchestration/roles/` — the architect is the main session and has none: architect, builder, verifier, reviewer, test-engineer, debugger, and five stack specialists — security-reviewer, migration-reviewer, accessibility-reviewer, api-designer, designer — rendered per project from the roster (`C11`): prefixed by each chosen profile holding a fragment for one, generic when none does, and, for a project without a roster, from its profiles' teams as in `C10`. Each role names its department, `engineering` or `design`. The three write boundaries are fixed whatever the count: a role writes source (builder, and test-engineer for tests alone), writes the change's artifacts (architect), or reads only (every other). The orchestrator is the human. Commits only in `ship`.
 5. The decision model sits behind one interface; `jev` and `mock` backends in v0.1; each question carries its own rule on probabilities; `mock` behaviour is defined for every question.
 6. The guard is deterministic first and never allows on its own error; deny never comes from the model alone. Because a hook that crashes or times out cannot answer, a permission floor in `.claude/settings.json` carries the same deny and ask patterns (§9).
 7. The canary is a rule plus a `Stop` hook on the **main session's answers only**, active only in a project that chose the `canary` set; setup proposes `Hullaballoo!`, the word lives in `.harnex.yml`, and setup also states it in `AGENTS.md` since a rendered rules file cannot. Its warning is a signal of non-compliance, not a diagnosis of lost context.
 8. Everything committed is English, command names included: `explore`, `propose`, `apply`, `verify`, `ship`.
 9. Python with `uv` for scripts; minimum frontmatter for agents and skills.
 10. No AI author or co-author lines in commits or PRs, in harnex and in every harnessed project (`git` rule set).
-11. Names fixed now: `.harnex.yml` keys `project_name`, `profiles`, `sets`, `features`, `canary`, `decision_model`, `check_command`; rules at `.harnex/rules.md`; generation metadata at `.harnex/manifest.json`, committed; runtime state under `.harnex/state/`, not committed; tags `vX.Y.Z` from `v0.1.0`.
+11. Names fixed now: `.harnex.yml` keys `project_name`, `profiles`, `sets`, `features`, `canary`, `decision_model`, `check_command`, and two optional keys present together, `team` and `bench` (`C11`); rules at `.harnex/rules.md`; generation metadata at `.harnex/manifest.json`, committed; runtime state under `.harnex/state/`, not committed; tags `vX.Y.Z` from `v0.1.0`.
 12. `docs/` and `openspec/` are public; `.claude/` and `.agents/` at the repo root stay local.
 13. Phases are sliced by capability, each with a manual try and automated tests.
 14. A phase delivering several independent capabilities is split into lettered changes

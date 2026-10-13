@@ -37,6 +37,7 @@ def read_choices(text: str, plugin_root: Path, path: str = setup.CHOICES) -> "se
     unchanged — the reader is the schema, and the schema is stated once.
     """
     values = setup.parse_choices(text, path)
+    roster = setup.read_roster(values, path)
     answers = setup.Answers(
         project_name=str(values["project_name"]),
         profiles=tuple(values["profiles"]),  # type: ignore[arg-type]
@@ -45,6 +46,9 @@ def read_choices(text: str, plugin_root: Path, path: str = setup.CHOICES) -> "se
         canary=str(values["canary"]),
         decision_model=str(values["decision_model"]),
         check_command=str(values["check_command"]),
+        team=roster[0] if roster else (),
+        bench=roster[1] if roster else (),
+        roster_recorded=roster is not None,
     )
     setup.validate_answers(answers, plugin_root)
     return answers
@@ -55,6 +59,7 @@ def read_local_choices(text: str, plugin_root: Path, path: str = setup.LOCAL_CHO
     ten-key shape, same no-approvals reasoning, same `setup.parse_choices` reader — just
     the other key/list-key set."""
     values = setup.parse_choices(text, path, setup.LOCAL_ANSWER_KEYS, setup.LOCAL_LIST_KEYS)
+    roster = setup.read_roster(values, path)
     answers = setup.Answers(
         project_name=str(values["project_name"]),
         profiles=tuple(values["profiles"]),  # type: ignore[arg-type]
@@ -66,6 +71,9 @@ def read_local_choices(text: str, plugin_root: Path, path: str = setup.LOCAL_CHO
         visibility=str(values["visibility"]),
         tools=tuple(values["tools"]),  # type: ignore[arg-type]
         store_id=str(values["store_id"]),
+        team=roster[0] if roster else (),
+        bench=roster[1] if roster else (),
+        roster_recorded=roster is not None,
     )
     setup.validate_answers(answers, plugin_root)
     return answers

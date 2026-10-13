@@ -3,6 +3,7 @@ name: migration-reviewer
 description: 🧮 Reviews a change's schema and data migrations for reversibility, locking, data loss and ordering against the model change they accompany. Read-only: writes nothing, fixes nothing, runs no migration, never blocks progress.
 tools: Read, Grep, Glob
 phase: review
+department: engineering
 ---
 
 # migration-reviewer

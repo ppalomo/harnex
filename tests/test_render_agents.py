@@ -44,6 +44,7 @@ name: {name}
 description: {emoji} Does the {name}'s work in the {phase} phase. Read-only where it can be.
 tools: {tools}
 phase: {phase}
+department: engineering
 ---
 
 # {name}
@@ -270,6 +271,23 @@ def test_a_role_missing_a_field_is_refused(harness: Path) -> None:
         render_agents.render(["alpha"], harness)
 
 
+def test_a_role_with_an_unknown_department_is_refused_by_name(harness: Path) -> None:
+    path = harness / "orchestration" / "roles" / "checker.md"
+    path.write_text(
+        ROLES["checker"].replace("department: engineering\n", "department: marketing\n"),
+        encoding="utf-8",
+    )
+    with pytest.raises(AgentError, match="department `marketing`, which is none of "
+                       "engineering, design"):
+        render_agents.read_role(path)
+
+
+def test_a_rendered_agent_carries_no_department(harness: Path) -> None:
+    for content in render_agents.render(["alpha"], harness).values():
+        fields, _ = _frontmatter(content)
+        assert "department" not in fields and "phase" not in fields
+
+
 # --- the real roles -----------------------------------------------------------------
 
 
@@ -281,14 +299,14 @@ def test_the_real_roles_render_against_a_fixture_profile(
     team = profiles / "omega"
     team.mkdir(parents=True)
     (team / "profile.md").write_text("# omega\n", encoding="utf-8")
-    for specialist in ("reviewer", "security-reviewer", "api-designer"):
+    for specialist in ("designer", "security-reviewer", "api-designer"):
         (team / f"{specialist}.md").write_text(f"On omega, as {specialist}.\n")
 
     agents = render_agents.render(["omega"], plugin_root, profiles)
 
     assert list(agents) == [
         ".claude/agents/omega-api-designer.md",
-        ".claude/agents/omega-reviewer.md",
+        ".claude/agents/omega-designer.md",
         ".claude/agents/omega-security-reviewer.md",
     ]
     for relative, content in agents.items():
@@ -652,7 +670,7 @@ def test_the_real_roles_are_listed_by_phase(plugin_root: Path, tmp_path: Path) -
     team = profiles / "omega"
     team.mkdir(parents=True)
     (team / "profile.md").write_text("# omega\n", encoding="utf-8")
-    for specialist in ("reviewer", "security-reviewer", "api-designer"):
+    for specialist in ("designer", "security-reviewer", "api-designer"):
         (team / f"{specialist}.md").write_text(f"On omega, as {specialist}.\n")
 
     def emoji(role: str) -> str:
@@ -661,16 +679,16 @@ def test_the_real_roles_are_listed_by_phase(plugin_root: Path, tmp_path: Path) -
 
     review = render_agents.agents_for(["omega"], "review", plugin_root, profiles)
     assert [(agent.name, agent.emoji) for agent in review] == [
-        ("omega-reviewer", emoji("reviewer")),
         ("omega-security-reviewer", emoji("security-reviewer")),
     ]
-    assert [agent.emoji for agent in review] == ["\U0001f50d", "\U0001f510"]
+    assert [agent.emoji for agent in review] == ["\U0001f510"]
 
     propose = render_agents.agents_for(["omega"], "propose", plugin_root, profiles)
     assert [(agent.name, agent.emoji) for agent in propose] == [
-        ("omega-api-designer", emoji("api-designer"))
+        ("omega-api-designer", emoji("api-designer")),
+        ("omega-designer", emoji("designer")),
     ]
-    assert propose[0].emoji == "\U0001f50c"
+    assert [agent.emoji for agent in propose] == ["\U0001f50c", "\U0001f3a8"]
 
     for phase in ("apply", "verify"):
         assert render_agents.agents_for(["omega"], phase, plugin_root, profiles) == []
@@ -804,3 +822,334 @@ def test_the_command_line_names_what_it_synced(harness: Path) -> None:
 def test_a_harness_with_no_agents_directory_is_refused(harness: Path) -> None:
     with pytest.raises(AgentError, match="is not a directory of agents"):
         render_agents.sync(harness)
+
+
+# --- the specialists a roster can name --------------------------------------------------
+
+
+def test_the_shipped_plugin_holds_five_specialists(plugin_root: Path) -> None:
+    """A specialist is a review- or propose-phase role that does not ship as a plugin
+    agent: `debugger` is a review role but has an adapter under `agents/`, and `builder`
+    is left out by its phase, `apply`."""
+    specialists = render_agents.held_specialists(plugin_root)
+
+    assert [(s["department"], s["specialist"]) for s in specialists] == [
+        ("design", "accessibility-reviewer"),
+        ("design", "designer"),
+        ("engineering", "api-designer"),
+        ("engineering", "migration-reviewer"),
+        ("engineering", "security-reviewer"),
+    ]
+    names = {s["specialist"] for s in specialists}
+    assert "debugger" not in names
+    assert (plugin_root / "agents" / "debugger.md").is_file()
+    assert "builder" not in names
+    for entry in specialists:
+        assert set(entry) == {"specialist", "department", "emoji", "phase"}
+        assert entry["phase"] in ("review", "propose")
+        role = render_agents.read_role(
+            plugin_root / "orchestration" / "roles" / f"{entry['specialist']}.md"
+        )
+        assert entry["emoji"] == role.description[0]
+
+
+# --- the roster (design.md D2, D3 of `agent-roster`) -------------------------------------
+
+
+def _omega(tmp_path: Path, *specialists: str) -> Path:
+    """A profiles directory holding one team, `omega`, with a fragment per name given."""
+    profiles = tmp_path / "profiles"
+    team = profiles / "omega"
+    team.mkdir(parents=True)
+    (team / "profile.md").write_text("# omega\n", encoding="utf-8")
+    for specialist in specialists:
+        (team / f"{specialist}.md").write_text(f"On omega, as {specialist}.\n")
+    return profiles
+
+
+def test_a_roster_name_with_no_fragment_renders_the_generic_agent(harness: Path) -> None:
+    """`beta` holds no fragment for `adviser`, so the roster's `adviser` is the role's
+    adapter at the project path; `beta-checker` is off the roster and renders nothing."""
+    agents = render_agents.render(["beta"], harness, team=["adviser"], bench=[])
+
+    assert list(agents) == [".claude/agents/adviser.md"]
+    assert agents[".claude/agents/adviser.md"] == render_agents.adapter_of(
+        _roles(harness)["adviser"]
+    )
+    assert render_agents.render_generic(_roles(harness)["adviser"]) == (
+        render_agents.adapter_of(_roles(harness)["adviser"])
+    )
+
+
+def test_a_roster_name_with_a_fragment_in_one_profile_renders_the_prefixed_agent_only(
+    harness: Path,
+) -> None:
+    agents = render_agents.render(["beta"], harness, team=["checker"], bench=[])
+    assert agents == {
+        ".claude/agents/beta-checker.md": render_agents.render(["beta"], harness)[
+            ".claude/agents/beta-checker.md"
+        ]
+    }
+
+
+def test_a_roster_name_with_fragments_in_two_profiles_renders_two_prefixed_agents(
+    harness: Path,
+) -> None:
+    agents = render_agents.render(["alpha", "beta"], harness, team=["checker"], bench=[])
+    assert list(agents) == [
+        ".claude/agents/alpha-checker.md",
+        ".claude/agents/beta-checker.md",
+    ]
+
+
+def test_a_fragment_for_a_name_off_the_roster_renders_nothing(harness: Path) -> None:
+    agents = render_agents.render(["alpha"], harness, team=["checker"], bench=[])
+    assert ".claude/agents/alpha-adviser.md" not in agents
+    assert list(agents) == [".claude/agents/alpha-checker.md"]
+
+
+@pytest.mark.parametrize(
+    ("specialist", "expected"),
+    [
+        ("maker", "only a review- or propose-phase role takes a fragment"),
+        ("judge", "only a review- or propose-phase role takes a fragment"),
+        ("nobody", "names no role the harness holds"),
+    ],
+)
+def test_an_invalid_fragment_off_the_roster_is_still_refused(
+    harness: Path, specialist: str, expected: str
+) -> None:
+    stray = _fragment(harness, "beta", specialist)
+    with pytest.raises(AgentError) as refusal:
+        render_agents.render(["beta"], harness, team=["checker"], bench=[])
+    assert str(stray) in str(refusal.value)
+    assert expected in str(refusal.value)
+
+
+@pytest.mark.parametrize("roster", [None, (["security-reviewer"], [])])
+def test_a_fragment_for_a_role_that_ships_as_a_plugin_agent_is_refused_by_name(
+    plugin_root: Path, tmp_path: Path, roster: tuple[list[str], list[str]] | None
+) -> None:
+    profiles = _omega(tmp_path, "debugger", "security-reviewer")
+    team, bench = roster if roster else (None, None)
+    with pytest.raises(AgentError) as refusal:
+        render_agents.render(["omega"], plugin_root, profiles, team=team, bench=bench)
+    message = str(refusal.value)
+    assert str(profiles / "omega" / "debugger.md") in message
+    assert "`debugger` ships as a plugin agent" in message
+
+
+def test_no_shipped_profile_carries_a_fragment_for_a_role_that_ships(
+    plugin_root: Path,
+) -> None:
+    shipped = {path.stem for path in (plugin_root / "agents").glob("*.md")}
+    profiles = plugin_root / "tools" / "profiles"
+    for directory in sorted(path for path in profiles.iterdir() if path.is_dir()):
+        assert not shipped & set(render_agents.fragments_of(directory.name, profiles))
+
+
+def test_an_empty_roster_renders_nothing(harness: Path) -> None:
+    assert render_agents.render(["alpha", "beta"], harness, team=[], bench=[]) == {}
+    for phase in render_agents.PHASES:
+        assert render_agents.agents_for(["alpha"], phase, harness, team=[], bench=[]) == []
+
+
+def test_the_same_roster_in_two_orders_renders_the_same_bytes(harness: Path) -> None:
+    forward = render_agents.render(
+        ["alpha", "beta"], harness, team=["checker", "adviser"], bench=[]
+    )
+    backward = render_agents.render(
+        ["beta", "alpha"], harness, team=["adviser", "checker", "adviser"], bench=[]
+    )
+    assert forward == backward
+    assert list(forward) == sorted(forward)
+
+
+def test_a_bench_name_is_rendered_and_never_listed(harness: Path) -> None:
+    agents = render_agents.render(["beta"], harness, team=["checker"], bench=["adviser"])
+    assert ".claude/agents/adviser.md" in agents
+
+    for phase in render_agents.PHASES:
+        listed = render_agents.agents_for(
+            ["beta"], phase, harness, team=["checker"], bench=["adviser"]
+        )
+        assert "adviser" not in {agent.role for agent in listed}
+    review = render_agents.agents_for(
+        ["beta"], "review", harness, team=["checker"], bench=["adviser"]
+    )
+    assert [agent.name for agent in review] == ["beta-checker"]
+
+
+def test_a_generic_team_agent_is_listed_under_its_own_name(harness: Path) -> None:
+    propose = render_agents.agents_for(["beta"], "propose", harness, team=["adviser"], bench=[])
+    assert [(agent.name, agent.path, agent.emoji) for agent in propose] == [
+        ("adviser", ".claude/agents/adviser.md", "\U0001f9ed")
+    ]
+
+
+def test_without_a_roster_the_walk_is_unchanged(harness: Path) -> None:
+    """`C10`'s output: every fragment of every chosen profile, and no generic agent."""
+    agents = render_agents.render(["alpha", "beta"], harness)
+    assert agents == render_agents.render(["alpha", "beta"], harness, team=None, bench=None)
+    assert list(agents) == [
+        ".claude/agents/alpha-adviser.md",
+        ".claude/agents/alpha-checker.md",
+        ".claude/agents/beta-checker.md",
+    ]
+    assert [a.name for a in render_agents.agents_for(["alpha", "beta"], "review", harness)] == [
+        "alpha-checker",
+        "beta-checker",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("team", "bench", "missing"), [(["checker"], None, "bench"), (None, [], "team")]
+)
+def test_one_roster_list_without_the_other_is_refused(
+    harness: Path, team: list[str] | None, bench: list[str] | None, missing: str
+) -> None:
+    with pytest.raises(AgentError, match=f"`{missing}` is missing"):
+        render_agents.render(["alpha"], harness, team=team, bench=bench)
+    with pytest.raises(AgentError, match=f"`{missing}` is missing"):
+        render_agents.agents_for(["alpha"], "review", harness, team=team, bench=bench)
+
+
+def test_roster_refusal_names_the_entry_the_reason_and_the_specialists(
+    harness: Path,
+) -> None:
+    message = render_agents.roster_refusal(
+        "nobody", "it names no role the harness holds", render_agents.held_specialists(harness)
+    )
+    assert message == (
+        "`nobody` cannot be on a roster: it names no role the harness holds. "
+        "The specialists held are: adviser, checker."
+    )
+
+
+@pytest.mark.parametrize(
+    ("team", "bench", "entry", "reason"),
+    [
+        (["nobody"], [], "nobody", "it names no role the harness holds"),
+        (
+            ["maker"],
+            [],
+            "maker",
+            "its phase is `apply`, and only a review- or propose-phase role can be "
+            "on a roster",
+        ),
+        (
+            [],
+            ["judge"],
+            "judge",
+            "its phase is `verify`, and only a review- or propose-phase role can be "
+            "on a roster",
+        ),
+        (["checker"], ["checker"], "checker", "it is named on both the team and the bench"),
+    ],
+)
+def test_each_roster_refusal_is_worded_by_roster_refusal(
+    harness: Path, team: list[str], bench: list[str], entry: str, reason: str
+) -> None:
+    expected = render_agents.roster_refusal(
+        entry, reason, render_agents.held_specialists(harness)
+    )
+    assert "The specialists held are: adviser, checker." in expected
+    with pytest.raises(AgentError) as refusal:
+        render_agents.render(["alpha"], harness, team=team, bench=bench)
+    assert str(refusal.value) == expected
+    with pytest.raises(AgentError) as refusal:
+        render_agents.agents_for(["alpha"], "review", harness, team=team, bench=bench)
+    assert str(refusal.value) == expected
+
+
+def test_a_roster_name_that_ships_as_a_plugin_agent_is_refused(harness: Path) -> None:
+    """`checker` gains an adapter under `agents/`, so it is in every project already and
+    no longer a specialist a roster can name."""
+    _adapter(harness, "checker")
+    expected = render_agents.roster_refusal(
+        "checker",
+        "it ships as a plugin agent, so every project has it already",
+        render_agents.held_specialists(harness),
+    )
+    assert expected.endswith("The specialists held are: adviser.")
+    with pytest.raises(AgentError) as refusal:
+        render_agents.render(["gamma"], harness, team=["checker"], bench=[])
+    assert str(refusal.value) == expected
+
+
+def test_the_real_debugger_cannot_be_on_a_roster(plugin_root: Path, tmp_path: Path) -> None:
+    profiles = _omega(tmp_path)
+    with pytest.raises(AgentError) as refusal:
+        render_agents.render(["omega"], plugin_root, profiles, team=["debugger"], bench=[])
+    message = str(refusal.value)
+    assert message.startswith("`debugger` cannot be on a roster: it ships as a plugin agent")
+    assert message.endswith(
+        "The specialists held are: accessibility-reviewer, designer, api-designer, "
+        "migration-reviewer, security-reviewer."
+    )
+
+
+# --- the roster on the command line (design.md D5 of `agent-roster`) -------------------
+
+
+def test_the_command_line_lists_the_team_and_not_the_bench(harness: Path) -> None:
+    for phase, expected in (("review", "\U0001f50d beta-checker\n"), ("propose", "")):
+        result = _run(
+            harness,
+            "list",
+            *("--profiles", "beta", "--team", "checker", "--bench", "adviser"),
+            *("--phase", phase),
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == expected
+        assert result.stderr == ""
+
+
+def test_the_command_line_lists_nothing_for_an_empty_roster(harness: Path) -> None:
+    for phase in render_agents.PHASES:
+        result = _run(
+            harness,
+            "list",
+            *("--profiles", "alpha,beta", "--team", "", "--bench", "", "--phase", phase),
+        )
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == ""
+        assert result.stderr == ""
+
+
+def test_the_command_line_without_a_roster_lists_what_c10_listed(harness: Path) -> None:
+    result = _run(harness, "list", "--profiles", "alpha,beta", "--phase", "review")
+    assert result.returncode == 0
+    assert result.stdout == "\U0001f50d alpha-checker\n\U0001f50d beta-checker\n"
+    result = _run(harness, "list", "--profiles", "alpha,beta", "--phase", "propose")
+    assert result.returncode == 0
+    assert result.stdout == "\U0001f9ed alpha-adviser\n"
+
+
+@pytest.mark.parametrize("command", ["list", "render"])
+@pytest.mark.parametrize(
+    ("given", "missing"), [(("--team", "checker"), "bench"), (("--bench", ""), "team")]
+)
+def test_the_command_line_refuses_one_roster_option_without_the_other(
+    harness: Path, command: str, given: tuple[str, str], missing: str
+) -> None:
+    phase = ("--phase", "review") if command == "list" else ()
+    result = _run(harness, command, "--profiles", "alpha", *given, *phase)
+    assert result.returncode != 0
+    assert result.stdout == ""
+    assert f"`{missing}` is missing" in result.stderr
+
+
+def test_the_command_line_lists_a_generic_agent_with_no_profile(plugin_root: Path) -> None:
+    emoji = render_agents.read_role(
+        plugin_root / "orchestration" / "roles" / "security-reviewer.md"
+    ).description[0]
+    result = _run(
+        plugin_root,
+        "list",
+        *("--profiles", "", "--team", "security-reviewer", "--bench", ""),
+        *("--phase", "review"),
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == f"{emoji} security-reviewer\n"
+    assert result.stderr == ""

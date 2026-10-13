@@ -3,6 +3,7 @@ name: debugger
 description: 🐛 Traces a reported failure through its evidence to where it is produced, without running anything, and reports a root-cause hypothesis with what supports it. Read-only: writes nothing, fixes nothing, never presents a hypothesis as a diagnosis.
 tools: Read, Grep, Glob
 phase: review
+department: engineering
 ---
 
 # debugger

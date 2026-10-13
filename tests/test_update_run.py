@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+import render_agents
 import setup
 import update
 from conftest import TEAM_PROFILE, TEAM_SPECIALISTS, commit_all, git, team_agent_paths, tree
@@ -352,3 +353,130 @@ def test_an_edited_stale_agent_stops_the_update_and_nothing_is_removed(
     assert tree(project) == before, "the conflict stands, so nothing is removed or written"
     assert all((project / path).is_file() for path in rest)
     assert set(team_agent_paths()) <= set(_record(project)["paths"])
+
+
+# --- a recorded roster is validated (agent-roster, design.md D2) ----------------------
+
+
+def test_update_refuses_a_roster_naming_builder_with_the_renderer_s_words(
+    project: Path, answers, setup_run, plugin_root: Path
+) -> None:
+    code, said = setup_run("write", project, answers)
+    assert code == 0, said
+    choices_path = project / setup.CHOICES
+    choices_path.write_text(
+        choices_path.read_text(encoding="utf-8") + "team:\n  - builder\nbench:\n",
+        encoding="utf-8",
+    )
+    commit_all(project)
+    before = tree(project)
+
+    with pytest.raises(render_agents.AgentError) as renderer:
+        render_agents._check_roster(["builder"], [], plugin_root)
+    with pytest.raises(setup.SetupError) as refusal:
+        update.run_update(project, plugin_root)
+    assert str(refusal.value) == str(renderer.value)
+    assert tree(project) == before, "the refusal must write nothing"
+
+
+# --- the roster's agents (agent-roster, design.md D3) ----------------------------------
+
+
+def test_a_dropped_profile_swaps_a_roster_name_to_its_generic_agent_on_update(
+    project: Path, answers, setup_run, team_plugin_root: Path, capsys
+) -> None:
+    """The roster names `security-reviewer`; the only profile holding a fragment for it
+    is dropped by hand. The next update removes the prefixed agent, writes the generic
+    one, re-records both, asks nothing, and names what it removed."""
+    answers["team"] = ["security-reviewer"]
+    answers["bench"] = []
+    _set_up_with_the_team(project, answers, setup_run, team_plugin_root)
+    prefixed = render_agents.agent_path(TEAM_PROFILE, "security-reviewer")
+    generic = render_agents.generic_path("security-reviewer")
+    assert (project / prefixed).is_file() and not (project / generic).exists()
+    _drop_the_profile_by_hand(project)
+
+    code = update.main(["--project", str(project), "--plugin-root", str(team_plugin_root)])
+    assert code == 0
+    out, err = capsys.readouterr()
+    assert err == ""
+    assert f"remove    {prefixed}" in out
+    assert f"create    {generic}" in out
+    assert f"Removed: {prefixed}" in out
+    assert "Conflicts" not in out and "approve" not in out, "nothing was asked"
+    assert not (project / prefixed).exists()
+    role = render_agents.read_role(
+        render_agents.roles_dir(team_plugin_root) / "security-reviewer.md"
+    )
+    assert (project / generic).read_bytes() == render_agents.render_generic(role)
+    record = _record(project)
+    assert set(record["paths"]) == set(setup.HARNESS_PATHS) | {generic}
+
+    commit_all(project)
+    before = tree(project)
+    report, ok = update.run_update(project, team_plugin_root)
+    assert ok is True and "Nothing to do" in report
+    assert tree(project) == before
+
+
+def _set_the_roster_by_hand(project: Path, team: list[str], bench: list[str]) -> None:
+    """The person's own edit to the roster, which the writer puts last in `.harnex.yml`:
+    everything from `team:` on is replaced by the two lists, and the edit is committed."""
+    choices_path = project / setup.CHOICES
+    lines = choices_path.read_text(encoding="utf-8").splitlines(keepends=True)
+    head = lines[: lines.index("team:\n")]
+    roster = ["team:\n", *(f"  - {name}\n" for name in team)]
+    roster += ["bench:\n", *(f"  - {name}\n" for name in bench)]
+    choices_path.write_text("".join(head + roster), encoding="utf-8")
+    commit_all(project)
+
+
+def test_a_name_added_to_the_roster_is_rendered_on_update_and_nothing_else_moves(
+    project: Path, answers, setup_run, team_plugin_root: Path, capsys
+) -> None:
+    """`harness-update`, "A name added to the roster": the person adds `designer`, for
+    which the chosen profile holds no fragment. Update renders the generic agent, records
+    it, asks nothing, and leaves every other path byte-identical."""
+    answers["team"] = ["security-reviewer"]
+    answers["bench"] = []
+    _set_up_with_the_team(project, answers, setup_run, team_plugin_root)
+    _set_the_roster_by_hand(project, ["security-reviewer", "designer"], [])
+    before = tree(project)
+
+    code = update.main(["--project", str(project), "--plugin-root", str(team_plugin_root)])
+    assert code == 0
+    out, err = capsys.readouterr()
+    assert err == ""
+    added = render_agents.generic_path("designer")
+    assert f"create    {added}" in out
+    assert "Removed:" not in out and "approve" not in out, "nothing removed, nothing asked"
+    after = tree(project)
+    changed = {path for path in after if before.get(path) != after[path]}
+    assert changed == {added, setup.MANIFEST}
+    assert set(before) - set(after) == set()
+    assert added in _record(project)["paths"]
+
+
+def test_a_name_removed_from_the_roster_has_its_agents_removed_on_update(
+    project: Path, answers, setup_run, team_plugin_root: Path, capsys
+) -> None:
+    """`harness-update`, "A name removed from the roster": the person drops
+    `migration-reviewer` from the bench. Update removes its agent, still matching its
+    fingerprint, drops it from the record, reports it, and asks nothing."""
+    answers["team"] = ["security-reviewer"]
+    answers["bench"] = ["migration-reviewer"]
+    _set_up_with_the_team(project, answers, setup_run, team_plugin_root)
+    dropped = render_agents.agent_path(TEAM_PROFILE, "migration-reviewer")
+    kept = render_agents.agent_path(TEAM_PROFILE, "security-reviewer")
+    assert (project / dropped).is_file()
+    _set_the_roster_by_hand(project, ["security-reviewer"], [])
+
+    code = update.main(["--project", str(project), "--plugin-root", str(team_plugin_root)])
+    assert code == 0
+    out, err = capsys.readouterr()
+    assert err == ""
+    assert f"remove    {dropped}" in out
+    assert f"Removed: {dropped}" in out
+    assert "approve" not in out, "nothing was asked"
+    assert not (project / dropped).exists() and (project / kept).is_file()
+    assert dropped not in _record(project)["paths"]

@@ -489,3 +489,24 @@ def test_an_edited_stale_agent_stops_the_write_and_nothing_is_removed(
     assert "approve its adoption" not in said
     assert tree(project) == before, "the conflict stands, so nothing is removed or written"
     assert set(team_agent_paths()) <= set(_record(project)["paths"])
+
+
+# --- the roster's agents (agent-roster, design.md D3) ----------------------------------
+
+
+def test_a_team_name_no_profile_holds_a_fragment_for_writes_and_records_its_generic_agent(
+    project: Path, answers, setup_run, team_plugin_root: Path
+) -> None:
+    answers["profiles"] = [TEAM_PROFILE]
+    answers["team"] = ["designer"]
+    answers["bench"] = []
+    code, said = setup_run("write", project, answers, plugin_root=team_plugin_root)
+    assert code == 0, said
+    path = render_agents.generic_path("designer")
+    role = render_agents.read_role(render_agents.roles_dir(team_plugin_root) / "designer.md")
+    assert (project / path).read_bytes() == render_agents.render_generic(role)
+    assert path in said and "named on the project's team" in said
+    assert not any((project / agent).exists() for agent in team_agent_paths())
+    record = _record(project)
+    assert record["paths"][path] == setup.digest((project / path).read_bytes())
+    assert set(record["paths"]) == set(setup.HARNESS_PATHS) | {path}

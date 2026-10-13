@@ -3,6 +3,7 @@ name: builder
 description: 💻 Turns one task from a change's tasks.md into a diff, scoped to the task's own declared paths (or a judged scope when it declares none) and never openspec/ or .harnex/. Never ticks tasks.md, never commits.
 tools: Read, Grep, Glob, Edit, Write, Bash
 phase: apply
+department: engineering
 ---
 
 # builder

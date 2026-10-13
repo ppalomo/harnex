@@ -39,9 +39,10 @@ which is checked the same way. If `git rev-parse` fails, there is no repository:
 and commit first. The harness's own paths do not count — `AGENTS.md`, `CLAUDE.md`,
 `.harnex.yml`, anything under `.harnex/`, `openspec/config.yaml`,
 `.claude/settings.json`, `.mcp.json`, `CLAUDE.local.md`,
-`.claude/settings.local.json`, and every rendered agent path
-`.claude/agents/<profile>-<specialist>.md` that the profiles the project has recorded or
-is about to choose produce, or that the generation record lists — each path on its own,
+`.claude/settings.local.json`, and every rendered agent path — prefixed
+`.claude/agents/<profile>-<specialist>.md` or generic `.claude/agents/<specialist>.md` —
+that the roster (`team` and `bench`) and the profiles the project has recorded or is
+about to choose produce, or that the generation record lists — each path on its own,
 so a stale agent awaiting removal never blocks the run that removes it, but never the
 directory `.claude/agents/` itself nor any other file in it, since the project's own
 agents there are the project's and an uncommitted one counts like any other project
@@ -66,8 +67,8 @@ and the answer is an empty list.
 
 Then look for the project's already-recorded answers: `.harnex/config.yml` if the project
 is local visibility, otherwise `.harnex.yml`. If either is there, those are the project's
-answers — take them as given and do not ask again, visibility included. Setup never
-rewrites either file.
+answers — take them as given and do not ask again, visibility and roster included. Setup
+never rewrites either file.
 
 ## 2. Ask, in this order, only what you cannot derive
 
@@ -75,8 +76,8 @@ The questions below are more than a question tool takes in one call: `AskUserQue
 accepts at most 4 questions per call, each with 2 to 4 options, and a call that exceeds
 either limit fails with "Invalid tool parameters". Ask in batches of at most 4, keeping
 the order, and fold a question into its neighbour only when the answers are independent
-(the name and the visibility, for instance). A list longer than 4 — the rule sets — is a
-multi-select question that proposes the whole list in its description, or a plain
+(the name and the visibility, for instance). A list longer than 4 — the rule sets, the
+roster — is a multi-select question that proposes the whole list in its description, or a plain
 question in the conversation, never more than 4 options.
 
 1. **Project name** — propose the directory's name.
@@ -92,23 +93,35 @@ question in the conversation, never more than 4 options.
    `choices` — one list per profile of `specialist`, `emoji` and `phase` entries; read
    it as JSON, since the raw output escapes the emoji — and show each as
    `<emoji> <specialist>`: the emoji, exactly one space, the name. A profile with an
-   empty list brings none; say so. Choosing the profile imports its team, and there is
-   nothing else to answer about it.
-5. **Canary word** — only if the `canary` set was chosen. Propose the word from `choices`
+   empty list brings none; say so. A profile's team is what that stack adds to the
+   specialists it holds a fragment for; who is on the project's team is the roster's
+   answer, asked next.
+5. **Roster** — on a first setup only. Show every specialist from the `specialists` key
+   of `choices` (read as JSON), grouped by department in the order it prints them —
+   engineering, then design — each as `<emoji> <name>` with its phase. Say what the two
+   lists mean: the **team** is the specialists the skills start on their own, the
+   **bench** is the ones that are rendered but only the person starts. Propose as the
+   team every specialist the chosen profiles hold a fragment for, read from `teams`, and
+   an empty bench. A specialist no chosen profile holds a fragment for is rendered as
+   its generic agent. Record both lists in the answers document, `team` and `bench`,
+   even when one or both are empty. A project whose choices are recorded is never asked
+   this again: its roster is whatever the file says, and the person edits the file and
+   runs setup again to change it.
+6. **Canary word** — only if the `canary` set was chosen. Propose the word from `choices`
    and say what it is for: every answer ends with it, and a missing word is the cheapest
    sign that the rules may have dropped out of the context.
-6. **Decision backend** — `mock` asks the person on every decision, `jev` calls the model
+7. **Decision backend** — `mock` asks the person on every decision, `jev` calls the model
    and needs a key in the environment. Propose `mock`.
-7. **Check command** — the command that must pass before anything is called done. You
+8. **Check command** — the command that must pass before anything is called done. You
    cannot derive it and there is no default: ask, and if the person does not know, find
    the project's own check and propose it for confirmation.
-8. **Tools** (`local` visibility only) — which of the builder's two bindings, `claude`
+9. **Tools** (`local` visibility only) — which of the builder's two bindings, `claude`
    and `codex`, the person wants active for this project. Propose both. If `codex` is
    among them, say so before recording it: under `local` visibility the apply loop
    (`/harnex:apply`) hands Codex the rules — its prompt starts with an instruction to
    read `.harnex/rules.md` and follow it — but Codex used outside apply will not have
    them, since `AGENTS.md` is never written under `local` visibility.
-9. **Store location** (`local` visibility only) — asked only when no store id is
+10. **Store location** (`local` visibility only) — asked only when no store id is
    recorded and no store is already registered under the id setup would use; step 3
    says how to choose that id and look it up, so work that out before asking. Where the
    OpenSpec store for this project's changes should live, as a folder path outside the
@@ -151,6 +164,7 @@ shaped like this, then plan:
 {
   "project_name": "…",
   "profiles": [], "sets": ["…"], "features": [],
+  "team": ["…"], "bench": [],
   "canary": "…", "decision_model": "mock", "check_command": "…",
   "approvals": {
     "pointer_agents": false, "pointer_claude": false, "mcp_playwright": false,
@@ -172,6 +186,16 @@ any of them without `local` visibility, the same way it refuses a canary word wi
 `canary` set, and refuses a first `local` setup with no `store_path` and no
 `store_registered`.
 
+`team` and `bench` go together, both present or both absent. On a first setup they are
+the person's answer to the roster question, always present, empty or not. On a rerun,
+copy `team` and `bench` from the recorded choices file into the answers document only
+when the file carries them; when it does not, leave both keys out — never write either
+as an empty list, since an absent roster stays absent and an empty one would mean
+nobody. When the file carries only one of the two, copy that one as it is and do not
+invent the other: the script refuses it, naming the missing key and "the answers". Show
+that refusal as printed and add which file you read it from — `.harnex.yml` or
+`.harnex/config.yml` — so the person knows which file to fix.
+
 ```
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/setup.py" plan --answers <file> --project <project root>
 ```
@@ -182,13 +206,18 @@ exclude entries — `.env` among them when `jev` is chosen — the "register sto
 the global setting's line all appear in it, and the person's single yes to it covers
 them. There is no second plan.
 
-For every chosen profile with a team, the plan lists one line per rendered agent under
-`.claude/agents/`, naming the profile it comes from, with the same outcomes as any other
-harness-owned path. It may also list a `remove` line for an agent the record lists but a
+The plan lists one line per rendered agent under `.claude/agents/`, with the same
+outcomes as any other harness-owned path. Without a roster, each line comes from a chosen
+profile's team, naming the profile it comes from. With a roster, each line's detail names
+the team or the bench the specialist is on, and only a prefixed path's
+`<profile>-` still says which stack completed it. An agent line may also be generic —
+`.claude/agents/<specialist>.md`, for a roster name no chosen profile holds a fragment
+for. It may also list a `remove` line for an agent the record lists but a
 dropped profile no longer renders: that line is part of the one plan, and the person's
 single yes to the plan is what covers that deletion — ask for no separate yes, and remove
 nothing the plan did not list. A `conflict` on an agent path is resolved like any other:
-adoption, only for a path the chosen profiles render; an edited stale agent is deleted by
+adoption, only for a path the roster and the chosen profiles render, not the profiles
+alone; an edited stale agent is deleted by
 hand, or restored as the harness wrote it so the plan can remove it.
 
 ## 5. Approvals are the person's, one by one

@@ -85,6 +85,10 @@ ANSWER_KEYS = (
 LOCAL_ANSWER_KEYS = ANSWER_KEYS + ("visibility", "tools", "store_id")
 LIST_KEYS = ("profiles", "sets", "features")
 LOCAL_LIST_KEYS = LIST_KEYS + ("tools",)
+# The project's own roster (agent-roster, design.md D1): two optional list keys, present
+# together or absent together, in either shape. Kept out of the four tuples above, which
+# every existing loop treats as required; `read_roster` is the one place that reads them.
+ROSTER_KEYS = ("team", "bench")
 DECISION_BACKENDS = ("mock", "jev")
 VISIBILITIES = ("shared", "local")
 # The builder role's own two bindings (docs/PLAN.md §4) — the only role with a choice of
@@ -178,11 +182,21 @@ class Answers:
     # so it is reused rather than registered again. Never recorded either.
     store_registered: bool = False
     global_instructions: bool = False
+    # The roster (agent-roster, design.md D1): recorded in either shape, last, and only
+    # when `roster_recorded` — absent and empty are different answers.
+    team: tuple[str, ...] = ()
+    bench: tuple[str, ...] = ()
+    roster_recorded: bool = False
 
     def as_choices(self) -> dict[str, object]:
-        """Only the seven `.harnex.yml` records; the approvals are this run's, not the
-        project's, and local visibility's own answers belong to `.harnex/config.yml`
-        instead (`as_local_choices`)."""
+        """Only the seven `.harnex.yml` records, plus the roster when one is recorded; the
+        approvals are this run's, not the project's, and local visibility's own answers
+        belong to `.harnex/config.yml` instead (`as_local_choices`)."""
+        choices = self._shared_choices()
+        choices.update(self._roster_choices())
+        return choices
+
+    def _shared_choices(self) -> dict[str, object]:
         return {
             "project_name": self.project_name,
             "profiles": list(self.profiles),
@@ -195,12 +209,46 @@ class Answers:
 
     def as_local_choices(self) -> dict[str, object]:
         """The ten `.harnex/config.yml` records: the same seven, plus local visibility's
-        own three."""
-        choices = self.as_choices()
+        own three, plus the roster last when one is recorded."""
+        choices = self._shared_choices()
         choices["visibility"] = self.visibility
         choices["tools"] = list(self.tools)
         choices["store_id"] = self.store_id
+        choices.update(self._roster_choices())
         return choices
+
+    def _roster_choices(self) -> dict[str, object]:
+        if not self.roster_recorded:
+            return {}
+        return {"team": list(self.team), "bench": list(self.bench)}
+
+
+def read_roster(
+    values: dict[str, object], path: str = CHOICES
+) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+    """The roster, read from either choices shape or the answers document (design.md D1).
+
+    Returns `None` when neither `team` nor `bench` is there, or both lists when both are.
+    One without the other is refused, naming `path` and the missing key: a person who
+    wrote one and forgot the other has not said what the other holds. Both empty is a
+    valid, explicit "nobody", distinct from absent.
+    """
+    present = [key for key in ROSTER_KEYS if key in values]
+    if not present:
+        return None
+    missing = [key for key in ROSTER_KEYS if key not in values]
+    if missing:
+        raise SetupError(
+            f"{path}: `{present[0]}` is stated without `{missing[0]}`; "
+            "the roster's two keys are stated together or not at all"
+        )
+    lists: list[tuple[str, ...]] = []
+    for key in ROSTER_KEYS:
+        value = values[key]
+        if not isinstance(value, (list, tuple)) or any(not isinstance(v, str) for v in value):
+            raise SetupError(f"{path}: `{key}` must be a list of names")
+        lists.append(tuple(value))
+    return lists[0], lists[1]
 
 
 def available_sets(plugin_root: Path) -> list[str]:
@@ -287,7 +335,9 @@ def read_answers(text: str, plugin_root: Path) -> Answers:
     if not isinstance(approvals, dict):
         raise SetupError("`approvals` must be an object")
     local_keys = {"visibility", "tools", "store_id", "store_path", "store_registered"}
-    unknown_keys = sorted(set(raw) - set(ANSWER_KEYS) - local_keys - {"approvals"})
+    unknown_keys = sorted(
+        set(raw) - set(ANSWER_KEYS) - local_keys - set(ROSTER_KEYS) - {"approvals"}
+    )
     if unknown_keys:
         raise SetupError(
             f"the answers name what the harness does not ask for: {', '.join(unknown_keys)}"
@@ -321,6 +371,7 @@ def read_answers(text: str, plugin_root: Path) -> Answers:
     store_registered = raw.get("store_registered", False)
     if not isinstance(store_registered, bool):
         raise SetupError("`store_registered` must be true or false")
+    roster = read_roster(raw, "the answers")
 
     answers = Answers(
         project_name=str(values["project_name"]),
@@ -340,6 +391,9 @@ def read_answers(text: str, plugin_root: Path) -> Answers:
         store_path=store_path,
         store_registered=store_registered,
         global_instructions=bool(approvals.get("global_instructions", False)),
+        team=roster[0] if roster else (),
+        bench=roster[1] if roster else (),
+        roster_recorded=roster is not None,
     )
     validate_answers(answers, plugin_root)
     return answers
@@ -371,6 +425,13 @@ def validate_answers(answers: Answers, plugin_root: Path) -> None:
             raise SetupError(
                 f"no such {key[:-1]}: {', '.join(unknown)}. The harness holds: {holds}."
             )
+    if answers.roster_recorded:
+        # Worded by the renderer's own `roster_refusal()` (agent-roster, design.md D2), so
+        # setup, update and the renderer refuse a roster with exactly the same text.
+        try:
+            render_agents._check_roster(list(answers.team), list(answers.bench), plugin_root)
+        except render_agents.AgentError as error:
+            raise SetupError(str(error)) from None
     if not answers.sets:
         raise SetupError(
             "no rule set was chosen. The harness holds: " + ", ".join(held["sets"]) + "."
@@ -435,12 +496,39 @@ def validate_answers(answers: Answers, plugin_root: Path) -> None:
             raise SetupError(f"{path} is not a path the harness owns, so it cannot adopt it")
 
 
+def available_specialists(plugin_root: Path) -> dict[str, list[dict[str, str]]]:
+    """The specialists a roster can name, grouped by department (design.md D6 of
+    `agent-roster`).
+
+    Read from `render_agents.held_specialists`, the same function `validate_answers`
+    checks a roster against, so the offer and the validation cannot disagree. Departments
+    come in the order `render_agents.DEPARTMENTS` lists them, each list sorted by name and
+    each entry `{"specialist", "emoji", "phase"}`; a department holding nobody maps to an
+    empty list.
+    """
+    try:
+        held = render_agents.held_specialists(plugin_root)
+    except render_agents.AgentError as error:
+        raise SetupError(str(error)) from error
+    grouped: dict[str, list[dict[str, str]]] = {
+        department: [] for department in render_agents.DEPARTMENTS
+    }
+    for entry in held:
+        grouped[entry["department"]].append(
+            {"specialist": entry["specialist"], "emoji": entry["emoji"], "phase": entry["phase"]}
+        )
+    for members in grouped.values():
+        members.sort(key=lambda member: member["specialist"])
+    return grouped
+
+
 def choices_on_offer(plugin_root: Path) -> dict[str, object]:
     """What a project may choose, derived from what the harness holds, not from a list."""
     return {
         "sets": available_sets(plugin_root),
         "profiles": available_profiles(plugin_root),
         "teams": available_teams(plugin_root),
+        "specialists": available_specialists(plugin_root),
         "features": available_features(plugin_root),
         "decision_models": list(DECISION_BACKENDS),
         "default_canary": DEFAULT_CANARY,
@@ -466,7 +554,8 @@ def parse_choices(
 
     `keys`/`list_keys` default to `.harnex.yml`'s own shape; `.harnex/config.yml` (local
     visibility, design.md D2) passes `LOCAL_ANSWER_KEYS`/`LOCAL_LIST_KEYS` instead — the
-    line-level grammar is the same flat shape either way.
+    line-level grammar is the same flat shape either way. `ROSTER_KEYS` are known in
+    either shape but optional; `read_roster` is what reads them (agent-roster, D1).
     """
     values: dict[str, object] = {}
     current: str | None = None
@@ -498,7 +587,7 @@ def parse_choices(
             "The file is flat on purpose."
         )
 
-    unknown = sorted(set(values) - set(keys))
+    unknown = sorted(set(values) - set(keys) - set(ROSTER_KEYS))
     if unknown:
         raise SetupError(f"{path}: unknown key {', '.join(unknown)}")
     missing = [key for key in keys if key not in values]
@@ -825,10 +914,32 @@ def _render_agents(answers: Answers, plugin_root: Path) -> tuple[dict[str, bytes
     unchanged, update, conflict, adopt — applies to an agent unchanged, and the record
     lists it by hash like any other path. A profile without a team adds nothing. A
     fragment the renderer refuses stops the plan the way any other refusal does.
+
+    With a roster recorded (agent-roster, design.md D3), the renderer walks the profiles
+    and the roster together: each path is a roster name's prefixed or generic agent, and
+    its reason says which of the two lists names it. Without one, the walk is the
+    profiles' alone, as before.
     """
     desired: dict[str, bytes] = {}
     why: dict[str, str] = {}
     try:
+        if answers.roster_recorded:
+            named: dict[str, str] = {}
+            for listed, names in (("team", answers.team), ("bench", answers.bench)):
+                for name in names:
+                    named[render_agents.generic_path(name)] = listed
+                    for profile in answers.profiles:
+                        named[render_agents.agent_path(profile, name)] = listed
+            rendered = render_agents.render(
+                list(answers.profiles),
+                plugin_root,
+                team=list(answers.team),
+                bench=list(answers.bench),
+            )
+            for path, body in rendered.items():
+                desired[path] = body
+                why[path] = f"named on the project's {named[path]}"
+            return dict(sorted(desired.items())), why
         for profile in sorted(set(answers.profiles)):
             for path, body in render_agents.render([profile], plugin_root).items():
                 desired[path] = body

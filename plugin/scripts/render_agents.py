@@ -28,9 +28,16 @@ skill labels a review without ever parsing an agent's body.
 
     uv run plugin/scripts/render_agents.py list --profiles alpha,beta --phase review
 
+Both commands take a roster as ``--team`` and ``--bench`` (design.md D5 of
+`agent-roster`): comma separated, given together or not at all, an empty value a present
+empty list. With one, ``--profiles`` may be empty, and a roster name no profile holds a
+fragment for is its generic agent; a bench agent is rendered and never listed.
+
+    uv run plugin/scripts/render_agents.py list --profiles "" --team x --bench "" --phase review
+
 The plugin's own agents under ``agents/`` are the same rendering without a profile
 (D8): ``sync`` rewrites every adapter already present there from the role of its name —
-``name``, ``description``, ``tools``, no ``phase``, the body whole — so a role is edited
+``name``, ``description``, ``tools``, no ``phase`` or ``department``, the body whole — so a role is edited
 once and its adapter regenerated, never maintained. ``--check`` writes nothing and names
 each adapter that differs, which is what the correspondence test asserts is empty. An
 adapter whose role does not exist is refused by name; the set of core agents is the set
@@ -51,9 +58,10 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-# A role file opens with exactly these four fields, in this order (design.md D2). The
-# rendered agent keeps the first three and drops `phase`, which is the skills' concern.
-ROLE_FIELDS = ("name", "description", "tools", "phase")
+# A role file opens with exactly these five fields, in this order (design.md D2, and D4
+# of `agent-roster`). The rendered agent keeps the first three and drops `phase`, which is
+# the skills' concern, and `department`, which groups roles and gates nothing.
+ROLE_FIELDS = ("name", "description", "tools", "phase", "department")
 AGENT_FIELDS = ("name", "description", "tools")
 
 # The four phases a role can belong to (design.md D2), and the two whose roles take a
@@ -61,6 +69,10 @@ AGENT_FIELDS = ("name", "description", "tools")
 # either behind a new name.
 PHASES = ("apply", "propose", "review", "verify")
 FRAGMENT_PHASES = frozenset({"review", "propose"})
+
+# The departments a role can belong to (design.md D4 of `agent-roster`). A role declares
+# exactly one; anything else is refused by name.
+DEPARTMENTS = ("engineering", "design")
 
 PROFILE_FILE = "profile.md"
 AGENTS_DIR = ".claude/agents"
@@ -77,12 +89,13 @@ class AgentError(ValueError):
 
 @dataclass(frozen=True)
 class Role:
-    """One role as the harness holds it: its four fields and the prose an agent reads."""
+    """One role as the harness holds it: its five fields and the prose an agent reads."""
 
     name: str
     description: str
     tools: str
     phase: str
+    department: str
     body: str
     path: Path
 
@@ -164,6 +177,11 @@ def read_role(path: Path) -> Role:
         raise AgentError(
             f"{path}: declares name `{fields['name']}` but is named `{path.stem}`"
         )
+    if fields["department"] not in DEPARTMENTS:
+        raise AgentError(
+            f"{path}: declares department `{fields['department']}`, which is none of "
+            f"{', '.join(DEPARTMENTS)}"
+        )
     if not body.strip():
         raise AgentError(f"{path}: has no body")
 
@@ -172,6 +190,7 @@ def read_role(path: Path) -> Role:
         description=fields["description"],
         tools=fields["tools"],
         phase=fields["phase"],
+        department=fields["department"],
         body=body,
         path=path,
     )
@@ -193,6 +212,33 @@ def held_roles(plugin_root: Path) -> list[str]:
     if not directory.is_dir():
         raise AgentError(f"{directory} is not a directory of roles")
     return sorted(path.stem for path in directory.glob("*.md"))
+
+
+def held_specialists(plugin_root: Path) -> list[dict[str, str]]:
+    """The specialists a roster can name, sorted by department then name.
+
+    A specialist is a role whose phase is `review` or `propose` and that does not ship as
+    a plugin agent (design.md D2 of `agent-roster`). Which roles ship is read from the
+    files under `agents/`, as `sync` reads it, so no list of core names lives here. The
+    emoji is the first code point of the role's `description`, as `agents_for` reads it.
+    """
+    shipped = {path.stem for path in agents_dir(plugin_root).glob("*.md")}
+    specialists: list[dict[str, str]] = []
+    for name in held_roles(plugin_root):
+        if name in shipped:
+            continue
+        role = read_role(roles_dir(plugin_root) / f"{name}.md")
+        if phase_of(role) not in FRAGMENT_PHASES:
+            continue
+        specialists.append(
+            {
+                "specialist": role.name,
+                "department": role.department,
+                "emoji": role.description[0],
+                "phase": role.phase,
+            }
+        )
+    return sorted(specialists, key=lambda entry: (entry["department"], entry["specialist"]))
 
 
 def fragments_of(profile: str, profiles_dir: Path) -> dict[str, Path]:
@@ -250,7 +296,8 @@ def _compose(name: str, description: str, tools: str, body: str) -> bytes:
 
 
 def adapter_of(role: Role) -> bytes:
-    """The plugin's own agent for a role: the role without a profile and without `phase`.
+    """The plugin's own agent for a role: the role without a profile, `phase` or
+    `department`.
 
     The body is copied whole, so the adapter carries the role's persona unchanged (D7)
     and a reader of either file reads the same prose.
@@ -260,6 +307,8 @@ def adapter_of(role: Role) -> bytes:
 
 def render_agent(profile: str, role: Role, fragment: str) -> bytes:
     """One rendered agent: the role's three agent fields, its body whole, the fragment.
+
+    `phase` and `department` are dropped, as for the plugin's own adapters.
 
     The body is copied as it stands so the role's persona reaches every stack agent
     unchanged (design.md D7); the fragment follows under a heading naming the profile.
@@ -273,21 +322,101 @@ def render_agent(profile: str, role: Role, fragment: str) -> bytes:
     )
 
 
+def render_generic(role: Role) -> bytes:
+    """The generic agent of a roster name no chosen profile holds a fragment for: the
+    role's adapter, the same bytes `sync` writes under `agents/`, placed in the project
+    at `.claude/agents/<name>.md` (design.md D3 of `agent-roster`). No stack heading, no
+    description suffix."""
+    return adapter_of(role)
+
+
+def generic_path(specialist: str) -> str:
+    """Where the host reads a project's generic agent, relative to the project root."""
+    return f"{AGENTS_DIR}/{specialist}.md"
+
+
+def _shipped(plugin_root: Path) -> set[str]:
+    """The roles that ship as plugin agents, read from `agents/` as `sync` reads them."""
+    return {path.stem for path in agents_dir(plugin_root).glob("*.md")}
+
+
+def roster_refusal(entry: str, reason: str, specialists: list[dict[str, str]]) -> str:
+    """The one wording of a roster refusal (design.md D2 of `agent-roster`): the entry,
+    why it cannot be on a roster, and the specialists the harness holds.
+
+    `specialists` is what `held_specialists()` returns. The renderer and setup's
+    `validate_answers` both word their refusal here, so a roster is refused with the same
+    text whichever path it reaches the harness by.
+    """
+    held = ", ".join(entry["specialist"] for entry in specialists) or "none"
+    return f"`{entry}` cannot be on a roster: {reason}. The specialists held are: {held}."
+
+
+def _roster_reason(name: str, plugin_root: Path) -> str | None:
+    """Why a name cannot be on a roster, or None when it is a specialist the harness
+    holds. The reasons are checked in the order a reader would ask them."""
+    role_path = roles_dir(plugin_root) / f"{name}.md"
+    if not role_path.is_file():
+        return "it names no role the harness holds"
+    role = read_role(role_path)
+    if phase_of(role) not in FRAGMENT_PHASES:
+        return (
+            f"its phase is `{role.phase}`, and only a review- or propose-phase role can be "
+            f"on a roster"
+        )
+    if name in _shipped(plugin_root):
+        return "it ships as a plugin agent, so every project has it already"
+    return None
+
+
+def _check_roster(team: list[str], bench: list[str], plugin_root: Path) -> None:
+    """Refuse a roster that names anything but a specialist held, or a name twice over."""
+    specialists = held_specialists(plugin_root)
+    for name in sorted(set(team) | set(bench)):
+        reason = _roster_reason(name, plugin_root)
+        if reason is not None:
+            raise AgentError(roster_refusal(name, reason, specialists))
+    for name in sorted(set(team) & set(bench)):
+        raise AgentError(
+            roster_refusal(name, "it is named on both the team and the bench", specialists)
+        )
+
+
 def _walk(
     profiles: list[str],
     plugin_root: Path | None,
     profiles_dir: Path | None,
+    team: list[str] | None = None,
+    bench: list[str] | None = None,
 ) -> list[tuple[str, Role, bytes]]:
-    """Every agent the chosen profiles call for, as (path, role, rendered bytes), sorted.
+    """Every agent the chosen profiles and roster call for, as (path, role, rendered
+    bytes), sorted.
 
     The one place a fragment meets its role, so `render` and `agents_for` accept and
-    refuse exactly the same teams. Profiles are read as a set, so the result depends on
-    which were chosen and never on how they were listed. Nothing is returned until every
-    fragment has been accepted: a refusal renders nothing.
+    refuse exactly the same teams. Profiles and roster names are read as sets, so the
+    result depends on which were chosen and never on how they were listed. Nothing is
+    returned until every fragment has been accepted: a refusal renders nothing.
+
+    Without a roster (`team` and `bench` both None) every fragment of every chosen
+    profile renders, and nothing else. With one (both given), each roster name renders
+    one prefixed agent per chosen profile holding a fragment for it, or, when none does,
+    its generic agent (design.md D2, D3 of `agent-roster`); a fragment for a name off the
+    roster renders nothing, but is still checked like any other.
     """
+    if (team is None) != (bench is None):
+        raise AgentError(
+            "a roster is `team` and `bench` together: "
+            + ("`bench` is missing" if bench is None else "`team` is missing")
+        )
     root = plugin_root or default_plugin_root()
     source = profiles_dir or default_profiles_dir(root)
+    roster: set[str] | None = None
+    if team is not None and bench is not None:
+        _check_roster(team, bench, root)
+        roster = set(team) | set(bench)
+    shipped = _shipped(root)
     walked: dict[str, tuple[Role, bytes]] = {}
+    covered: set[str] = set()
     for profile in sorted(set(profiles)):
         for specialist, fragment in fragments_of(profile, source).items():
             role_path = roles_dir(root) / f"{specialist}.md"
@@ -302,10 +431,21 @@ def _walk(
                     f"{fragment}: `{role.name}` is a {role.phase}-phase role, and only a "
                     f"review- or propose-phase role takes a fragment."
                 )
+            if specialist in shipped:
+                raise AgentError(
+                    f"{fragment}: `{role.name}` ships as a plugin agent, so every project "
+                    f"has it already, and a role that ships takes no fragment."
+                )
+            if roster is not None and specialist not in roster:
+                continue
+            covered.add(specialist)
             walked[agent_path(profile, specialist)] = (
                 role,
                 render_agent(profile, role, fragment.read_text(encoding="utf-8")),
             )
+    for specialist in sorted((roster or set()) - covered):
+        role = read_role(roles_dir(root) / f"{specialist}.md")
+        walked[generic_path(specialist)] = (role, render_generic(role))
     return [(path, role, content) for path, (role, content) in sorted(walked.items())]
 
 
@@ -313,9 +453,16 @@ def render(
     profiles: list[str],
     plugin_root: Path | None = None,
     profiles_dir: Path | None = None,
+    *,
+    team: list[str] | None = None,
+    bench: list[str] | None = None,
 ) -> dict[str, bytes]:
-    """Render every agent the chosen profiles call for, as `{path: bytes}` sorted by path."""
-    return {path: content for path, _, content in _walk(profiles, plugin_root, profiles_dir)}
+    """Render every agent the chosen profiles and roster call for, as `{path: bytes}`
+    sorted by path. `team` and `bench` are given together or not at all."""
+    return {
+        path: content
+        for path, _, content in _walk(profiles, plugin_root, profiles_dir, team, bench)
+    }
 
 
 def agents_for(
@@ -323,6 +470,9 @@ def agents_for(
     phase: str,
     plugin_root: Path | None = None,
     profiles_dir: Path | None = None,
+    *,
+    team: list[str] | None = None,
+    bench: list[str] | None = None,
 ) -> list[Agent]:
     """The agents the chosen profiles render for one phase, sorted by name.
 
@@ -330,12 +480,16 @@ def agents_for(
     start, `propose` for the advisors to consult. The emoji is read back from the
     rendered agent's own `description`, not from the role, so it is by construction what
     the host shows for that agent (D7). Every refusal `render` makes, this makes too.
+    With a roster, only the agents of team names are kept: a bench agent is rendered and
+    never started.
     """
     if phase not in PHASES:
         raise AgentError(f"no such phase: {phase}. The phases are {', '.join(PHASES)}.")
     agents: list[Agent] = []
-    for path, role, content in _walk(profiles, plugin_root, profiles_dir):
+    for path, role, content in _walk(profiles, plugin_root, profiles_dir, team, bench):
         if role.phase != phase:
+            continue
+        if team is not None and role.name not in team:
             continue
         fields, _ = parse_frontmatter(content.decode("utf-8"), Path(path))
         agents.append(
@@ -397,7 +551,22 @@ def _parser() -> argparse.ArgumentParser:
     )
     common = argparse.ArgumentParser(add_help=False, parents=[located])
     common.add_argument(
-        "--profiles", required=True, type=_csv, help="the profiles chosen, comma separated"
+        "--profiles",
+        required=True,
+        type=_csv,
+        help="the profiles chosen, comma separated; empty for a roster with no profile",
+    )
+    common.add_argument(
+        "--team",
+        type=_csv,
+        default=None,
+        help="the roster's team, comma separated; given with --bench, empty for none",
+    )
+    common.add_argument(
+        "--bench",
+        type=_csv,
+        default=None,
+        help="the roster's bench, comma separated; given with --team, empty for none",
     )
 
     parser = argparse.ArgumentParser(
@@ -458,10 +627,12 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"{'stale' if args.check else 'synced'} {name}")
             return 1 if args.check and stale else 0
         if args.command == "list":
-            for agent in agents_for(args.profiles, args.phase, args.plugin_root):
+            for agent in agents_for(
+                args.profiles, args.phase, args.plugin_root, team=args.team, bench=args.bench
+            ):
                 print(f"{agent.emoji} {agent.name}")
             return 0
-        agents = render(args.profiles, args.plugin_root)
+        agents = render(args.profiles, args.plugin_root, team=args.team, bench=args.bench)
     except AgentError as error:
         print(f"render_agents: {error}", file=sys.stderr)
         return 2

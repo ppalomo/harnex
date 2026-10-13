@@ -7,5 +7,6 @@
 # ignores itself). Change a value here and run setup again to re-render what the harness
 # owns. The shape is flat, the same as `.harnex.yml`'s, with three answers of its own:
 # `visibility`, `tools` (the builder bindings you want active) and `store_id` (the local
-# OpenSpec store this project's own propose/apply/verify/ship work lives in).
+# OpenSpec store this project's own propose/apply/verify/ship work lives in). The same two
+# optional lists apply here: `team` and `bench`, present together or absent together.
 {{keys}}

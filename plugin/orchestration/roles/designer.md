@@ -3,6 +3,7 @@ name: designer
 description: 🎨 Reads a change's proposal and returns a design brief — screens, states, tokens, components, accessibility — for the architect to fold into design.md. Read-only: writes no artifact, decides nothing the proposal left open, never blocks progress.
 tools: Read, Grep, Glob
 phase: propose
+department: design
 ---
 
 # designer

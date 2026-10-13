@@ -66,6 +66,36 @@ def test_a_project_without_a_team_sees_exactly_what_it_saw_before(team_step: str
     assert "If it prints nothing, skip the rest of this step" in team_step
 
 
+LIST = 'uv run "${CLAUDE_PLUGIN_ROOT}/scripts/render_agents.py" list'
+
+
+def test_the_list_command_is_given_without_and_with_the_roster(team_step: str) -> None:
+    """Without a recorded roster the command is what it was; with one, `team` and `bench`
+    are passed through as read (agent-roster, design.md D5)."""
+    assert f"{LIST} --profiles <a,b> --phase review" in team_step
+    assert f"{LIST} --profiles <a,b> --team <x,y> --bench <z> --phase review" in team_step
+    assert "`team` and `bench` lists" in team_step
+    assert "an empty list as an empty value (`--team \"\"`)" in team_step
+
+
+def test_the_step_is_skipped_only_without_a_roster_and_without_a_profile(team_step: str) -> None:
+    assert "the file records neither a roster (`team` or `bench`) nor any profile, skip this whole step" in team_step
+    assert "A roster with no profile still starts its team" in team_step
+    assert "an empty `profiles` list alone is no reason to skip this step" in team_step
+
+
+def test_a_refusal_from_list_is_shown_with_the_file_and_stops_the_step(team_step: str) -> None:
+    assert "When `list` refuses" in team_step
+    assert "show the person that message exactly as printed, together with the file you read the choices from" in team_step
+    assert "stop this step: start none of the project's reviewers" in team_step
+    assert "Do not judge the keys yourself" in team_step
+
+
+def test_the_bench_is_never_started_and_a_project_without_a_roster_lists_as_before(team_step: str) -> None:
+    assert "A bench agent is never started by this skill" in team_step
+    assert "A project without a roster lists exactly what it listed before" in team_step
+
+
 def test_a_missing_agent_is_reported_with_update_as_the_remedy(team_step: str) -> None:
     assert "`.claude/agents/<name>.md` exists" in team_step
     assert "the agent is missing" in team_step
