@@ -844,3 +844,130 @@ def test_the_choices_verb_prints_the_teams_with_the_rest(team_plugin_root: Path)
     printed = json.loads(out.getvalue())
     assert printed["teams"] == setup.choices_on_offer(team_plugin_root)["teams"]
     assert printed["teams"][TEAM_PROFILE][0]["specialist"] == sorted(TEAM_SPECIALISTS)[0]
+
+
+# --- the roster's agents (agent-roster, design.md D3) ----------------------------------
+
+
+def _generic(name: str) -> str:
+    return render_agents.generic_path(name)
+
+
+def _prefixed(name: str, profile: str = TEAM_PROFILE) -> str:
+    return render_agents.agent_path(profile, name)
+
+
+def test_a_team_name_no_profile_holds_a_fragment_for_plans_its_generic_agent(
+    project: Path, team_plugin_root: Path, answers
+) -> None:
+    """`designer` is a propose-phase specialist the fixture profile holds no fragment
+    for, so the roster renders it generically: the role's own adapter, at a project path,
+    with the team's reason."""
+    answers["profiles"] = [TEAM_PROFILE]
+    answers["team"] = ["designer"]
+    answers["bench"] = []
+    plan = _plan(project, team_plugin_root, answers)
+    steps = _agent_steps(plan)
+    assert [step.path for step in steps] == [_generic("designer")]
+    step = steps[0]
+    assert (step.owner, step.action) == ("harness", setup.CREATE)
+    assert step.detail == "named on the project's team"
+    assert step.data == render_agents.render(
+        [TEAM_PROFILE], team_plugin_root, team=["designer"], bench=[]
+    )[_generic("designer")]
+    assert not plan.conflicts
+
+
+def test_a_roster_that_omits_a_specialist_with_a_fragment_plans_nothing_for_it(
+    project: Path, team_plugin_root: Path, answers
+) -> None:
+    """The profile holds three fragments; the roster names two, one per list. The third
+    renders nothing, and each of the two is planned with its own list's reason."""
+    answers["profiles"] = [TEAM_PROFILE]
+    answers["team"] = ["security-reviewer"]
+    answers["bench"] = ["api-designer"]
+    plan = _plan(project, team_plugin_root, answers)
+    steps = {step.path: step for step in _agent_steps(plan)}
+    assert sorted(steps) == [_prefixed("api-designer"), _prefixed("security-reviewer")]
+    assert steps[_prefixed("security-reviewer")].detail == "named on the project's team"
+    assert steps[_prefixed("api-designer")].detail == "named on the project's bench"
+    assert _prefixed("migration-reviewer") not in steps
+    assert _generic("migration-reviewer") not in steps
+
+
+def test_dropping_the_only_profile_with_a_fragment_swaps_prefixed_for_generic(
+    project: Path, team_plugin_root: Path, answers, setup_run
+) -> None:
+    answers["profiles"] = [TEAM_PROFILE]
+    answers["team"] = ["security-reviewer"]
+    answers["bench"] = []
+    code, said = setup_run("write", project, answers, plugin_root=team_plugin_root)
+    assert code == 0, said
+    assert (project / _prefixed("security-reviewer")).is_file()
+
+    answers["profiles"] = []
+    plan = _plan(project, team_plugin_root, answers)
+    assert not plan.conflicts
+    assert [step.path for step in plan.removals] == [_prefixed("security-reviewer")]
+    created = _step(plan, _generic("security-reviewer"))
+    assert created.action == setup.CREATE
+    assert created.detail == "named on the project's team"
+    record = _step(plan, setup.MANIFEST).data.decode("utf-8")
+    assert _generic("security-reviewer") in record
+    assert _prefixed("security-reviewer") not in record
+
+
+def test_a_name_dropped_from_both_lists_plans_its_removal(
+    project: Path, team_plugin_root: Path, answers, setup_run
+) -> None:
+    """A generic agent and a prefixed one, each dropped from the roster altogether:
+    both are the record's and still as written, so both are `remove` lines."""
+    answers["profiles"] = [TEAM_PROFILE]
+    answers["team"] = ["designer", "security-reviewer"]
+    answers["bench"] = ["api-designer"]
+    code, said = setup_run("write", project, answers, plugin_root=team_plugin_root)
+    assert code == 0, said
+
+    answers["team"] = ["security-reviewer"]
+    answers["bench"] = []
+    plan = _plan(project, team_plugin_root, answers)
+    assert not plan.conflicts
+    assert [step.path for step in plan.removals] == sorted(
+        [_generic("designer"), _prefixed("api-designer")]
+    )
+    assert _step(plan, _prefixed("security-reviewer")).action == setup.UNCHANGED
+
+
+def test_a_shared_rerun_with_the_generic_agent_uncommitted_plans_nothing_to_do(
+    project: Path, team_plugin_root: Path, answers, setup_run
+) -> None:
+    answers["team"] = ["designer"]
+    answers["bench"] = []
+    code, _ = setup_run("write", project, answers, plugin_root=team_plugin_root)
+    assert code == 0
+    status = git(project, "status", "--porcelain", "--untracked-files=all").stdout
+    assert _generic("designer") in status, "the generic agent is uncommitted"
+
+    plan = _plan_as_is(project, team_plugin_root, answers)
+    assert not plan.conflicts
+    assert all(step.path != setup.GIT_DIR for step in plan.steps)
+    assert plan.nothing_to_do
+
+
+def test_a_hand_written_agent_at_a_generic_path_is_a_conflict_naming_adoption(
+    project: Path, team_plugin_root: Path, answers
+) -> None:
+    hand = project / ".claude" / "agents" / "security-reviewer.md"
+    hand.parent.mkdir(parents=True)
+    hand.write_text("---\nname: mine\ndescription: mine\n---\n\nMine.\n", encoding="utf-8")
+    answers["team"] = ["security-reviewer"]
+    answers["bench"] = []
+    plan = _plan(project, team_plugin_root, answers)
+    assert _step(plan, _generic("security-reviewer")).action == setup.CONFLICT
+    conflict = next(c for c in plan.conflicts if _generic("security-reviewer") in c)
+    assert "approve its adoption" in conflict
+
+    answers["approvals"]["adopt"] = [_generic("security-reviewer")]
+    adopted = _plan(project, team_plugin_root, answers)
+    assert _step(adopted, _generic("security-reviewer")).action == setup.ADOPT
+    assert not adopted.conflicts

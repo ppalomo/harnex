@@ -15,6 +15,14 @@ needs is already recorded, so there is nothing for you to ask the person and not
 you to decide on their behalf — the removal included, since everything in an update plan
 was already approved when the project ran setup.
 
+Update re-renders from the recorded roster and profiles: the `team` and `bench` lists, when
+the project recorded them, and the profiles recorded alongside. A name added to or removed
+from the roster takes effect on the next update — an added name is rendered, a removed one's
+agent is removed. A dropped profile turns a prefixed agent into the generic one: the agent
+that profile rendered is removed and the same specialist is rendered as
+`.claude/agents/<specialist>.md` instead, if the roster still names it. A project with no
+recorded roster is rendered from its profiles alone, as before.
+
 The script is at `${CLAUDE_PLUGIN_ROOT}/scripts/update.py`. Run it with `uv run`.
 
 ## What this skill never does
@@ -27,6 +35,8 @@ The script is at `${CLAUDE_PLUGIN_ROOT}/scripts/update.py`. Run it with `uv run`
   approved, it never writes it.
 - Ask a question, or offer to adopt an unaccounted-for file. A conflict stops the run and
   names `/harnex:setup`'s own adoption path instead.
+- Add a roster to the choices file. Update never adds `team` or `bench` to `.harnex.yml` (or
+  `.harnex/config.yml`); a roster is recorded only by `/harnex:setup`.
 
 ## 1. Run it
 

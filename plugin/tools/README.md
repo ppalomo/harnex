@@ -11,6 +11,11 @@ The hands: what the agent can actually do, and what it needs installed to do it.
   directory `<name>/` whose `profile.md` is the profile and whose other `<specialist>.md`
   files are the team's fragments — what the stack adds to one specialist role under
   `../orchestration/roles/`. A flat profile is still valid; it simply has no team.
+  Since `C11` a project may record a roster — `team:` and `bench:` in `.harnex.yml` —
+  and then the roster decides who is on the team and a profile only supplies fragments
+  for the specialists it names; a named specialist no chosen profile holds a fragment for
+  is rendered as the generic agent, `.claude/agents/<specialist>.md`. Without a roster,
+  a profile's fragments are its team, as `C10` left them.
   **`plugin/tools/profiles/` and `plugin/tools/mcp/` are the only places in the plugin
   where a technology may be named.** A profile is chosen per project, not assumed.
 
@@ -48,7 +53,13 @@ The hands: what the agent can actually do, and what it needs installed to do it.
   role's voice. `../scripts/render_agents.py` renders it as the `## For this stack:
   <profile>` section after the role's body, into `.claude/agents/<profile>-<specialist>.md`
   in a harnessed project. A fragment for a role the harness does not hold, or for an
-  `apply`- or `verify`-phase role, is refused, not skipped.
+  `apply`- or `verify`-phase role, is refused, not skipped — with or without a roster,
+  every fragment of every chosen profile is read and checked, even one the roster does not
+  name.
+- **The roster's two keys**, `C11`: `setup` asks for them on a first setup, offering every
+  specialist grouped by its role's `department` and proposing the chosen profiles'
+  specialists as the team, and records both; `update` renders from them asking nothing.
+  A project set up before `C11` gains them only by its owner adding them by hand.
 
 ## Still to come
 

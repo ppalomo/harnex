@@ -227,7 +227,7 @@ def architecture() -> None:
     # column 1: harnex repo
     repo = c.frame(40, 120, 330, 560, "harnex repo (public)")
     r_plugin = c.box(60, 170, 290, 280,
-                     "plugin/  — a Claude Code plugin\ncommands: explore, propose,\n  apply, verify, ship\nskills: setup, update\nagents: builder, verifier, reviewer,\n  test-engineer, debugger\nhooks: guard, canary\nscripts: decide, guard, setup,\n  render_agents (Python)\nprofiles: fastapi, rails, flutter\n  (teams), react\nrules: git, code, sdd, safety…",
+                     "plugin/  — a Claude Code plugin\ncommands: explore, propose,\n  apply, verify, ship\nskills: setup, update\nagents: builder, verifier, reviewer,\n  test-engineer, debugger\nhooks: guard, canary\nscripts: decide, guard, setup,\n  render_agents (Python)\nprofiles: fastapi, rails, flutter\n  (fragments), react\nrules: git, code, sdd, safety…",
                      bg=TOOLS, size=13)
     r_docs = c.box(60, 470, 290, 80, "docs/  plan, diagrams, decisions\nopenspec/  harnex's own specs", bg=NEUTRAL, size=13)
     c.box(60, 570, 290, 100, "Pillars are the layout inside plugin/:\ncontext · tools · orchestration ·\ncontrol · feedback", bg=WHITE, size=13, dashed=True)
@@ -247,11 +247,11 @@ def architecture() -> None:
     # column 3: a project
     proj = c.frame(960, 120, 330, 560, "a project (any stack)")
     p1 = c.box(980, 170, 290, 70, "AGENTS.md, CLAUDE.md — yours;\nsetup asks for one pointer line each", bg=CONTEXT, size=13)
-    p2 = c.box(980, 260, 290, 90, ".harnex.yml — your choices:\nprofiles, features, canary word,\ndecision model backend", bg=CONTEXT, size=13)
+    p2 = c.box(980, 260, 290, 90, ".harnex.yml — your choices:\nprofiles, team, bench, features,\ncanary, decision model backend", bg=CONTEXT, size=13)
     p3 = c.box(980, 370, 290, 70, ".harnex/rules.md + manifest.json —\nharness-owned, committed", bg=CONTEXT, size=13)
     p4 = c.box(980, 460, 290, 70, ".claude/settings.json — permission\nfloor, merged by entry", bg=CONTROL, size=13)
     p5 = c.box(980, 550, 290, 70, "openspec/ — specs and changes\n(the commands drive it;\nyou never call openspec)", bg=ORCH, size=13)
-    c.box(980, 628, 290, 48, ".claude/agents/<profile>-<specialist>.md\nthe chosen profiles' teams, harness-owned", bg=ORCH, size=12)
+    c.box(980, 628, 290, 48, ".claude/agents/ — roster's specialists,\nper profile or generic, harness-owned", bg=ORCH, size=12)
 
     # column 4: services
     svc = c.frame(1420, 120, 300, 560, "services")
@@ -278,7 +278,7 @@ def workflow() -> None:
     steps = [
         ("/harnex:explore", "architect (Claude, main session)",
          "understands the idea,\nlays out options,\nrecommends one", "you pick a direction"),
-        ("/harnex:propose", "architect + verifier\n+ the teams' advisors",
+        ("/harnex:propose", "architect + verifier\n+ the team's advisors",
          "proposal, specs, design (advisors\nbrief it), tasks — verifier reviews\nthe design in a fresh context", "you approve the plan"),
         ("/harnex:apply", "builder (Codex via plugin,\nor Claude subagent)",
          "one task at a time,\ncheck command after each,\nevidence reported", "check green, scope kept"),
@@ -313,7 +313,7 @@ def workflow() -> None:
     canary = c.box(720, 560, 640, 70, "CANARY — after every answer, when the canary set is on: a Stop hook warns\nif the word is missing, a sign the rules may have dropped out of the context",
                    bg=FEEDBACK, size=12)
     c.label(40, 650, "Human gates: choosing a direction (explore), approving the plan (propose), any commit or push (ship), any destructive command (guard).", size=14)
-    c.label(40, 680, "Beside the pipeline, never blocking it: /harnex:review — the core reviewer (🔍 Almira), then every stack reviewer of the project's teams,\neach review shown as returned under its emoji and name. test-engineer (🧪 Raul) and debugger (🐛 Dani) are started by you, by name.", size=13)
+    c.label(40, 680, "Beside the pipeline, never blocking it: /harnex:review — the core reviewer (🔍 Almira), then every stack reviewer on the project's team (never the bench),\neach review shown as returned under its emoji and name. test-engineer (🧪 Raul) and debugger (🐛 Dani) are started by you, by name.", size=13)
     c.save("03-workflow")
 
 
@@ -462,8 +462,8 @@ def layout() -> None:
 
     items = [
         ("context/", CONTEXT, "rules/  git · code · sdd · safety · canary · language (one file per rule)\ntemplates/  AGENTS.md, CLAUDE.md, .harnex.yml, rules.md\nmemory.md  progress and hand-off conventions"),
-        ("tools/", TOOLS, "mcp/  context7, markitdown, playwright\nprofiles/  fastapi/, rails/, flutter/ (profile.md + a team's fragments), react.md, ui.json\nthe only place technologies are named"),
-        ("orchestration/", ORCH, "workflow.md  the five phases, entry and exit criteria\nroles/  ten prompts, each with a ## Who you are: the core team's five and five stack specialists\ndecisions/  phase.route, task.route, task.scope (YAML)"),
+        ("tools/", TOOLS, "mcp/  context7, markitdown, playwright\nprofiles/  fastapi/, rails/, flutter/ (profile.md + fragments), react.md, ui.json\nthe only place technologies are named"),
+        ("orchestration/", ORCH, "workflow.md  the five phases, entry and exit criteria\nroles/  ten prompts, each with a ## Who you are and a department: core five, five specialists\ndecisions/  phase.route, task.route, task.scope (YAML)"),
         ("control/", CONTROL, "floor.json  the permission floor setup merges into settings\nguard/  patterns.yaml, guard.py (PreToolUse hook)\napprovals.md  what always asks you"),
         ("feedback/", FEEDBACK, "check-command.md  the contract a project declares\ncanary/  canary.py (Stop hook)\nscope_check.py  detects a write outside a change's own directory\njournal/  decision journal format"),
     ]

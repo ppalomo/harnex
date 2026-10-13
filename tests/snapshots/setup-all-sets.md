@@ -302,8 +302,11 @@ directory; it does not stop the write or undo it.
 #
 # This file belongs to the project: the harness reads it and never rewrites it. Change a
 # value here and run setup again to re-render what the harness owns. The shape is flat on
-# purpose — scalars, and three lists — so that every hook and command can read it without
-# resolving a dependency first.
+# purpose — scalars, and lists — so that every hook and command can read it without
+# resolving a dependency first. Two of the lists are optional and go together: `team`,
+# the specialists the skills start, and `bench`, the ones only you start. Both absent
+# means no roster, and the chosen profiles' teams are rendered as they are; both present,
+# even empty, means exactly the specialists they name.
 project_name: scratch
 profiles:
 sets:

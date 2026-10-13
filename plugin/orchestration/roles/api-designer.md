@@ -3,6 +3,7 @@ name: api-designer
 description: 🔌 Reads a change's proposal and returns a contract brief — resources, operations, errors, versioning, compatibility — for the architect to fold into design.md. Read-only: writes no artifact, decides nothing the proposal left open, never blocks progress.
 tools: Read, Grep, Glob
 phase: propose
+department: engineering
 ---
 
 # api-designer

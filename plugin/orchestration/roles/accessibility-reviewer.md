@@ -3,6 +3,7 @@ name: accessibility-reviewer
 description: 🦽 Reviews a change's user-interface diff for keyboard reachability, accessible names, contrast and state conveyed by colour alone. Read-only: writes nothing, fixes nothing, never runs the application, never blocks progress.
 tools: Read, Grep, Glob
 phase: review
+department: design
 ---
 
 # accessibility-reviewer

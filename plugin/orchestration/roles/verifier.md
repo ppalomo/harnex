@@ -3,6 +3,7 @@ name: verifier
 description: 👀 Reviews a change's own artifacts for coherence — against each other, against docs/PLAN.md's settled decisions, and against the phase's exit criterion. Read-only: writes nothing, fixes nothing, never reopens a settled decision.
 tools: Read, Grep, Glob
 phase: verify
+department: engineering
 ---
 
 # verifier

@@ -3,6 +3,7 @@ name: test-engineer
 description: 🧪 Writes and edits a change's tests — new tests for a stated behaviour, repaired tests for behaviour that moved — and nothing else. Never touches production code, never ticks tasks.md, never commits.
 tools: Read, Grep, Glob, Edit, Write, Bash
 phase: apply
+department: engineering
 ---
 
 # test-engineer

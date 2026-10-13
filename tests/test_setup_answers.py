@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 
+import render_agents
 import setup
 
 
@@ -19,6 +20,35 @@ def test_the_choices_come_from_what_the_harness_holds(plugin_root: Path) -> None
     assert on_offer["sets"] == setup.available_sets(plugin_root)
     assert on_offer["decision_models"] == list(setup.DECISION_BACKENDS)
     assert on_offer["default_canary"]
+
+
+def test_the_choices_offer_the_specialists_by_department_beside_the_teams(
+    plugin_root: Path,
+) -> None:
+    """`choices` prints `specialists`, what a roster can name, grouped by department, each
+    with its emoji and phase; `teams` is still there and unchanged (design.md D6)."""
+    on_offer = setup.choices_on_offer(plugin_root)
+    specialists = on_offer["specialists"]
+    assert list(specialists) == list(render_agents.DEPARTMENTS)
+    names = {
+        department: [member["specialist"] for member in members]
+        for department, members in specialists.items()
+    }
+    assert names == {
+        "design": ["accessibility-reviewer", "designer"],
+        "engineering": ["api-designer", "migration-reviewer", "security-reviewer"],
+    }
+    held = render_agents.held_specialists(plugin_root)
+    for department, members in specialists.items():
+        assert members == [
+            {"specialist": e["specialist"], "emoji": e["emoji"], "phase": e["phase"]}
+            for e in held
+            if e["department"] == department
+        ]
+        for member in members:
+            assert len(member["emoji"]) == 1
+            assert member["phase"] in render_agents.FRAGMENT_PHASES
+    assert on_offer["teams"] == setup.available_teams(plugin_root)
 
 
 def test_a_kind_of_choice_with_nothing_to_choose_from(tmp_path: Path, plugin_root: Path) -> None:
@@ -200,3 +230,135 @@ def test_a_pointer_file_states_where_it_goes(tmp_path: Path, plugin_root: Path) 
     with pytest.raises(setup.SetupError) as refusal:
         setup.load_pointer(tmp_path / "plugin", "nowhere")
     assert "position" in str(refusal.value)
+
+
+# --- the roster (agent-roster, design.md D1) ------------------------------------------
+
+
+def test_the_answers_document_carries_the_roster_or_leaves_it_absent(
+    plugin_root: Path, answers
+) -> None:
+    absent = setup.read_answers(json.dumps(answers), plugin_root)
+    assert absent.roster_recorded is False
+    assert "team" not in absent.as_choices()
+
+    answers["team"] = ["security-reviewer"]
+    answers["bench"] = []
+    recorded = setup.read_answers(json.dumps(answers), plugin_root)
+    assert recorded.roster_recorded is True
+    assert recorded.team == ("security-reviewer",)
+    assert recorded.bench == ()
+
+
+def test_the_answers_document_refuses_one_roster_key_without_the_other(
+    plugin_root: Path, answers
+) -> None:
+    answers["team"] = ["reviewer"]
+    with pytest.raises(setup.SetupError) as refusal:
+        setup.read_answers(json.dumps(answers), plugin_root)
+    assert "`bench`" in str(refusal.value)
+
+
+def test_the_roster_is_kept_out_of_the_required_keys() -> None:
+    for key in setup.ROSTER_KEYS:
+        assert key not in setup.ANSWER_KEYS
+        assert key not in setup.LOCAL_ANSWER_KEYS
+        assert key not in setup.LIST_KEYS
+        assert key not in setup.LOCAL_LIST_KEYS
+
+
+def _keys_in_order(text: str) -> list[str]:
+    return [line.split(":", 1)[0] for line in text.splitlines() if line and not line.startswith(" ")]
+
+
+@pytest.mark.parametrize(
+    "team, bench",
+    [(("reviewer", "verifier"), ("debugger",)), ((), ())],
+    ids=["named", "nobody"],
+)
+def test_a_recorded_roster_is_written_once_and_last_in_either_shape(
+    team: tuple, bench: tuple
+) -> None:
+    answers = setup.Answers(
+        project_name="scratch",
+        profiles=("fastapi",),
+        sets=("code",),
+        features=(),
+        canary="",
+        decision_model="mock",
+        check_command="make check",
+        visibility="local",
+        store_id="scratch-store",
+        team=team,
+        bench=bench,
+        roster_recorded=True,
+    )
+    shared = setup.format_choices(answers)
+    local = setup.format_local_choices(answers)
+
+    assert _keys_in_order(shared) == list(setup.ANSWER_KEYS) + list(setup.ROSTER_KEYS)
+    assert _keys_in_order(local) == list(setup.LOCAL_ANSWER_KEYS) + list(setup.ROSTER_KEYS)
+
+    read_shared = setup.parse_choices(shared)
+    read_local = setup.parse_choices(
+        local, setup.LOCAL_CHOICES, setup.LOCAL_ANSWER_KEYS, setup.LOCAL_LIST_KEYS
+    )
+    assert read_shared == answers.as_choices()
+    assert read_local == answers.as_local_choices()
+    assert setup.read_roster(read_shared) == (team, bench)
+    assert setup.read_roster(read_local, setup.LOCAL_CHOICES) == (team, bench)
+
+
+def test_an_absent_roster_is_not_written(plugin_root: Path, answers) -> None:
+    read = setup.read_answers(json.dumps(answers), plugin_root)
+    written = setup.format_choices(read)
+    assert _keys_in_order(written) == list(setup.ANSWER_KEYS)
+    assert setup.read_roster(setup.parse_choices(written)) is None
+
+
+# --- a roster is validated (agent-roster, design.md D2) -------------------------------
+
+
+def _renderer_refusal(team: list[str], bench: list[str], plugin_root: Path) -> str:
+    """What the renderer itself says of a roster, so setup is held to the same words."""
+    with pytest.raises(render_agents.AgentError) as refusal:
+        render_agents._check_roster(team, bench, plugin_root)
+    return str(refusal.value)
+
+
+@pytest.mark.parametrize(
+    "team, bench, says",
+    [
+        (["nobody-at-all"], [], "it names no role the harness holds"),
+        (["builder"], [], "its phase is `apply`"),
+        ([], ["verifier"], "its phase is `verify`"),
+        (["debugger"], [], "it ships as a plugin agent"),
+        (["security-reviewer"], ["security-reviewer"], "named on both the team and the bench"),
+    ],
+    ids=["unknown", "apply-phase", "verify-phase", "shipped-adapter", "both-lists"],
+)
+def test_a_roster_naming_anything_but_a_held_specialist_is_refused_before_any_plan(
+    project: Path, plugin_root: Path, answers, setup_run, team: list, bench: list, says: str
+) -> None:
+    answers["team"] = team
+    answers["bench"] = bench
+    expected = _renderer_refusal(team, bench, plugin_root)
+    assert says in expected
+    held = [entry["specialist"] for entry in render_agents.held_specialists(plugin_root)]
+    assert "The specialists held are: " + ", ".join(held) + "." in expected
+
+    with pytest.raises(setup.SetupError) as refusal:
+        setup.read_answers(json.dumps(answers), plugin_root)
+    assert str(refusal.value) == expected
+
+    code, said = setup_run("plan", project, answers)
+    assert code == 1
+    assert expected in said
+    assert [p.name for p in project.iterdir()] == [".git"], "only the fixture's own repository"
+
+
+def test_a_roster_of_held_specialists_is_accepted(plugin_root: Path, answers) -> None:
+    answers["team"] = ["security-reviewer"]
+    answers["bench"] = ["designer"]
+    read = setup.read_answers(json.dumps(answers), plugin_root)
+    assert (read.team, read.bench) == (("security-reviewer",), ("designer",))

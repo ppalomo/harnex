@@ -1683,3 +1683,24 @@ def test_an_edited_stale_agent_is_a_conflict_under_local_visibility(
     code, said = setup_run("write", repo, rerun, plugin_root=team_plugin_root)
     assert code == 1 and first in said and "edited after the harness wrote it" in said
     assert all((repo / path).is_file() for path in team_agent_paths()), "nothing is removed"
+
+
+# --- the roster's agents (agent-roster, design.md D3) ----------------------------------
+
+
+def test_a_generic_agent_is_excluded_by_its_own_path_under_local(
+    repo: Path, local_answers: dict, setup_run, team_plugin_root: Path
+) -> None:
+    local_answers["team"] = ["designer"]
+    local_answers["bench"] = []
+    code, said = setup_run("write", repo, local_answers, plugin_root=team_plugin_root)
+    assert code == 0, said
+    path = render_agents.generic_path("designer")
+    assert (repo / path).is_file()
+    lines = (repo / setup.GIT_EXCLUDE).read_text(encoding="utf-8").splitlines()
+    assert [line for line in lines if line.startswith(".claude/agents")] == [path], (
+        "the generic agent by its own path, on its own line, and never the directory"
+    )
+    assert _check_ignore(repo, path)
+    assert not _check_ignore(repo, ".claude/agents/own.md")
+    assert _status(repo) == ""

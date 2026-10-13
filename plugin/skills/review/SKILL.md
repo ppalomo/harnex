@@ -58,18 +58,42 @@ revise the diff on its behalf. Whether to act on what it found is the person's c
 
 ## 4. Start the project's own reviewers, once each
 
-The profiles a project chose may bring a team: stack reviewers rendered into the project's
-`.claude/agents/` by `setup` and `update`. After the core reviewer, each of them reads the
-same diff. Read the recorded profiles from the same source as step 1 — `.harnex/config.yml`
-if it exists, otherwise `.harnex.yml`, its `profiles` list. If neither exists, or the list
-is empty, skip this whole step: the review is exactly what it was before this capability
-existed, the core reviewer's review and nothing more.
+The profiles a project chose, or the roster it recorded, may bring a team: reviewers
+rendered into the project's `.claude/agents/` by `setup` and `update`. After the core
+reviewer, each of them reads the same diff. Read the recorded choices from the same source
+as step 1 — `.harnex/config.yml` if it exists, otherwise `.harnex.yml` — and take from that
+one file its `profiles` list and, if it records them, its `team` and `bench` lists. If
+neither file exists, or the file records neither a roster (`team` or `bench`) nor any
+profile, skip this whole step: the review is exactly what it was before this capability
+existed, the core reviewer's review and nothing more. A roster with no profile still
+starts its team, through generic agents, so an empty `profiles` list alone is no reason
+to skip this step.
 
-Otherwise ask the harness which agents this phase starts:
+Otherwise ask the harness which agents this phase starts. When the file records neither
+`team` nor `bench`, run:
 
 ```
 uv run "${CLAUDE_PLUGIN_ROOT}/scripts/render_agents.py" list --profiles <a,b> --phase review
 ```
+
+When it records either, pass what it records — each of `team` and `bench` the file has,
+an empty list as an empty value (`--team ""`):
+
+```
+uv run "${CLAUDE_PLUGIN_ROOT}/scripts/render_agents.py" list --profiles <a,b> --team <x,y> --bench <z> --phase review
+```
+
+`--profiles` takes the recorded list as it is, empty (`--profiles ""`) when it is empty.
+Do not judge the keys yourself: a file that records one of `team` and `bench` without the
+other is `list`'s to refuse, not yours to complete. When `list` refuses — it exits non-zero
+and prints a message, for one option without the other or a name no roster can hold — show
+the person that message exactly as printed, together with the file you read the choices
+from (`.harnex/config.yml` or `.harnex.yml`), and stop this step: start none of the
+project's reviewers, as for an unreadable choices file. The core reviewer's review stands.
+
+A project without a roster lists exactly what it listed before: its profiles' teams. A
+bench agent is never started by this skill: the list leaves the bench out, and nothing
+here starts an agent the list did not print.
 
 It prints one line per agent: the agent's emoji, exactly one space, then its `name` —
 for example `🔐 <profile>-security-reviewer`. If it prints nothing, skip the rest of this

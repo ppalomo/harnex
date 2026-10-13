@@ -158,7 +158,7 @@ def tree(project: Path) -> dict[str, bytes]:
 # takes one (a propose-phase role and two review-phase roles), and one single-file profile
 # with no team. Neither names a stack: they stand for whatever profiles the harness ships.
 TEAM_PROFILE = "alpha"
-TEAM_SPECIALISTS = ("api-designer", "reviewer", "security-reviewer")
+TEAM_SPECIALISTS = ("api-designer", "migration-reviewer", "security-reviewer")
 FLAT_PROFILE = "beta"
 
 
