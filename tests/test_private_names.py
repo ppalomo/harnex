@@ -16,6 +16,7 @@ The owner's run, with both halves, is the gate before publishing.
 
 import os
 import re
+import shutil
 from pathlib import Path
 
 import pytest
@@ -118,25 +119,29 @@ def test_the_rendered_rules_publish_no_personal_term(tmp_path: Path, rules_dir: 
     assert not hits, "private names in the rendered rules:\n" + "\n".join(hits)
 
 
-def test_a_seeded_secret_is_detected(plugin_root: Path) -> None:
+def _seeded_copy(tmp_path: Path, plugin_root: Path, text: str) -> Path:
+    """A copy of the plugin with one bad file in it. The seed never touches the real
+    tree: a file written there would be seen, or deleted, by another run of the suite
+    scanning the same plugin at the same moment."""
+    copy = tmp_path / "plugin"
+    shutil.copytree(plugin_root, copy, ignore=shutil.ignore_patterns("__pycache__"))
+    (copy / "context" / "seeded-for-the-test.md").write_text(text, encoding="utf-8")
+    return copy
+
+
+def test_a_seeded_secret_is_detected(tmp_path: Path, plugin_root: Path) -> None:
     """The check fails on a tree it should reject, not only passes on a good one."""
-    seeded = plugin_root / "context" / "seeded-for-the-test.md"
-    seeded.write_text("token = " + "A" * 24 + "\n", encoding="utf-8")
-    try:
-        with pytest.raises(AssertionError, match="assigned secret"):
-            test_the_plugin_publishes_no_private_shape(plugin_root)
-    finally:
-        seeded.unlink()
+    seeded = _seeded_copy(tmp_path, plugin_root, "token = " + "A" * 24 + "\n")
+    with pytest.raises(AssertionError, match="assigned secret"):
+        test_the_plugin_publishes_no_private_shape(seeded)
 
 
-def test_a_seeded_home_path_is_detected(plugin_root: Path) -> None:
-    seeded = plugin_root / "context" / "seeded-for-the-test.md"
-    seeded.write_text("see /Users/someone/Developer/a-project/notes.md\n", encoding="utf-8")
-    try:
-        with pytest.raises(AssertionError, match="home directory path"):
-            test_the_plugin_publishes_no_private_shape(plugin_root)
-    finally:
-        seeded.unlink()
+def test_a_seeded_home_path_is_detected(tmp_path: Path, plugin_root: Path) -> None:
+    seeded = _seeded_copy(
+        tmp_path, plugin_root, "see /Users/someone/Developer/a-project/notes.md\n"
+    )
+    with pytest.raises(AssertionError, match="home directory path"):
+        test_the_plugin_publishes_no_private_shape(seeded)
 
 
 def _written(tmp_path: Path, plugin_root: Path) -> list[Path]:

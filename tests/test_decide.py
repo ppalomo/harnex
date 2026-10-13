@@ -890,3 +890,62 @@ def test_ask_defaults_to_mock_with_no_harnex_yml(tmp_path: Path, repo_root: Path
     )
     assert finished.returncode == 0, finished.stderr
     assert json.loads(finished.stdout)["backend"] == "mock"
+
+
+# --- a list of names in the state, as every skill hands over its profiles -----------
+
+
+def test_a_list_of_names_is_embedded_as_one_string() -> None:
+    state = {"phase": "review", "profiles": ["rails", "fastapi"], "empty": []}
+    assert decide.embed_name_lists(state) == {
+        "phase": "review",
+        "profiles": "rails, fastapi",
+        "empty": "",
+    }
+
+
+def test_a_list_holding_anything_but_names_is_left_for_the_refusal(tmp_path: Path) -> None:
+    question = _question(tmp_path)
+    state = decide.embed_name_lists({"phase": "propose", "candidates": [{"a": 1}, 2]})
+    with pytest.raises(decide.DecisionError, match="referencing it by position"):
+        decide.build_request(question, state)
+
+
+def test_ask_sends_the_profiles_list_to_jev_as_one_string(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The bug this guards: every skill passes `"profiles": [...]`, and the jev backend
+    refused the whole call, so no advice line ever resolved."""
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / ".harnex.yml").write_text(
+        _FULL_HARNEX_YML.replace("decision_model: mock", "decision_model: jev"), encoding="utf-8"
+    )
+    monkeypatch.setenv("OPENROUTER_API_KEY", "test-key")
+    state_file = tmp_path / "state.json"
+    state_file.write_text(
+        json.dumps({"phase": "explore", "task": "an idea", "profiles": ["rails", "flutter"]})
+    )
+    sent: list[dict] = []
+
+    def _post(body, api_key, timeout):
+        sent.append(body)
+        return {
+            "answers": {
+                "phase.route": {
+                    "type": "choice",
+                    "choice": "claude-opus",
+                    "confidence": 0.9,
+                    "probabilities": {"claude-opus": 0.9, "human": 0.1},
+                }
+            }
+        }
+
+    monkeypatch.setattr(decide, "_post", _post)
+    code = decide.main(
+        ["ask", "--question", "phase.route", "--state", str(state_file), "--project", str(project)]
+    )
+    out, err = capsys.readouterr()
+    assert code == 0, err
+    assert sent and sent[0]["state"]["profiles"] == "rails, flutter"
+    assert json.loads(out)["resolved"] is True

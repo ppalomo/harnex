@@ -294,6 +294,21 @@ def _validate_state(state: dict[str, object]) -> None:
             )
 
 
+def embed_name_lists(state: dict[str, object]) -> dict[str, object]:
+    """A field holding a list of plain names — the profiles a project chose, say — is a
+    set, not a sequence: no item is referenced by its position. The command line embeds
+    such a list as one comma-separated string, which is the form `_validate_state` asks
+    for, so a skill can hand over the list it read from the project's choices as it is.
+    A list holding anything but text is left alone, and `_validate_state` still refuses
+    it."""
+    return {
+        key: ", ".join(value)
+        if isinstance(value, (list, tuple)) and all(isinstance(item, str) for item in value)
+        else value
+        for key, value in state.items()
+    }
+
+
 def _question_payload(question: Question) -> dict[str, object]:
     if question.type in ("choice", "noul"):
         return {
@@ -655,6 +670,7 @@ def main(argv: list[str] | None = None) -> int:
         state = json.loads(state_text)
         if not isinstance(state, dict):
             raise DecisionError("the state must be a JSON object, keyed by field name")
+        state = embed_name_lists(state)
         backend = _project_backend(project)
         key = resolve_api_key(project)
         outcome = decide(question, state, backend, api_key=key)
