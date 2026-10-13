@@ -17,7 +17,7 @@ answer is shown, not enforced. `verify` binds it.
 
 **State:** `phase` (the command name), `task` (the person's own framing, one paragraph,
 never the model's description of its own work), `profiles` (the project's chosen stack
-profiles).
+profiles; the command line embeds a list of names as one comma-separated string).
 
 **Rule:** the option with the highest probability, if that probability is at least 0.70;
 otherwise ask the person which one they want.
